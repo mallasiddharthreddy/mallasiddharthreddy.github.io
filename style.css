@@ -16,8 +16,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:             #111110;
-    --surface:        #1C1C1A;
+    --bg:             #0F0F0E;
+    --surface:        #1A1A18;
     --text-primary:   #E8E6E1;
     --text-secondary: #9A9891;
     --accent:         #5B7FA6;
