@@ -55,6 +55,8 @@ h3 { font-size: 1.05rem; }
 
 p  { color: var(--text-secondary); margin-bottom: 1rem; }
 
+main p { text-align: justify; }
+
 a  {
   color: var(--accent);
   text-decoration: none;
