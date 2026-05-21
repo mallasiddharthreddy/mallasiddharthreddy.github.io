@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Community Bonding Period (April 30 to May 24) — Malla Siddharth Reddy</title>
+  <link rel="stylesheet" href="../../style.css" />
+</head>
+<body>
+
+<header>
+  <nav>
+    <a class="nav-name" href="../../">Malla Siddharth Reddy</a>
+    <button class="nav-toggle" aria-label="Toggle navigation" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="../../">About</a></li>
+      <li><a href="../../experience/">Experience</a></li>
+      <li><a href="../../research/">Research</a></li>
+      <li><a href="../../projects/">Projects</a></li>
+      <li><a href="../../hobbies/">Hobbies</a></li>
+      <li><a href="../../blogs/" class="active">Blogs</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+  <div class="item-header">
+    <h1>Community Bonding Period (April 30 to May 24)</h1>
+    <p class="item-subtitle">April 30 to May 24, 2026 · GSoC '26 DBpedia</p>
+  </div>
+
+  <div class="prose">
+    <p>The community bonding period is supposed to be about getting familiar with the codebase, setting up your environment, and getting to know your mentors before coding starts. That is exactly what I worked on these 3 weeks. There was also a major change with respect to what I would consider my baseline as going forward that changed the direction of the project in a good way.</p>
+
+    <h2>Getting Set Up</h2>
+
+    <p>The first thing I did was set up my local development environment and start experimenting with the core APIs the project depends on.</p>
+
+    <p>I pulled qwen3:8b locally via Ollama and ran a quick check to confirm it responds to prompts correctly. This model is the backbone for most of my other tasks down the line, the Planner, Entity Linker reasoning, and Answer Generator nodes in the architecture I proposed.</p>
+
+    <p>The first real finding came immediately. I had assumed the DBpedia Lookup API returns JSON by default. It does not. It returns XML unless I explicitly set the Accept header to application/json. A small thing but exactly the kind of detail I figured would break the pipeline silently if I had assumed rather than test.</p>
+
+    <p>The SPARQL endpoint tests were more interesting. I ran two queries for New York City's population. The first used dbo:population which is what a language model would naturally guess:</p>
+
+    <pre><code>{ "bindings": [ ] }</code></pre>
+
+    <p>Empty. No error, and no warning.</p>
+
+    <p>The second used dbo:populationTotal which is what DBpedia actually stores it as:</p>
+
+    <pre><code>{ "pop": { "value": "8804190" } }</code></pre>
+
+    <p>8,804,190. Correct.</p>
+
+    <p>This is the exact failure mode the entire agentic architecture is designed to handle. A one-shot system returns nothing and the user never knows why. I also tested the Einstein birthplace query and the Berlin area query. The birthplace query worked fine. The Berlin area query failed silently because the correct predicate is dbo:areaTotal, not dbo:area. Same pattern.</p>
+
+    <p>On May 4th I was added to two Slack groups, a general GSoC 2026 DBpedia group for all selected contributors and a dedicated project group with my mentors Tommaso Soru, Ronit Banerjee, Abdulsobur, and Gandharva Naveen. Introducing myself to the team made the project feel real and felt like an accomplishment in itself.</p>
+
+    <h2>Going Through the NSpM History</h2>
+
+    <p>My proposal mentioned reproducing baselines from the gsoc/anand and gsoc/zheyuan branches of the neural-qa repository. I cloned the repo and checked all six contributor branches. Both of those branches require TensorFlow 1.x, which is not compatible with modern macOS (the system I will be using throughout my GSoC). Rather than spending bonding period time on dependency issues, I went further and set up Mehrzad's 2023 branch instead, which uses a modern transformers stack.</p>
+
+    <p>I set up a Python 3.9 virtual environment, found and fixed two missing dependencies in his requirements.txt (pyarrow and importlib_metadata were absent, causing import errors on a clean install), patched a CPU compatibility issue in merge_model.py which hardcodes cuda:0 as the default device, and successfully merged his CodeGen 350M checkpoint with the base model.</p>
+
+    <p>I then extracted the full evaluation results from his CSV files. I wanted to have a look at these numbers since they were never published in Mehrzad's blog:</p>
+
+    <ul>
+      <li>CodeGen 350M: 0.4311 mean BLEU (post-processed) across 20,000 samples.</li>
+      <li>StarCoder 1B: 0.4378 mean BLEU (post-processed) across 20,000 samples.</li>
+      <li>CodeLlama 7B was also included in the repo but was never actually evaluated.</li>
+    </ul>
+
+    <p>One thing worth noting about these numbers. BLEU measures string similarity between the generated SPARQL and the gold standard query. It does not check whether the query actually returns the correct answer. A query can be structurally different from the gold standard but semantically identical and score near zero on BLEU. The system I am building will be evaluated on F1 against actual answer sets, which is a stricter and more meaningful metric.</p>
+
+    <h2>Discovering the 2026 Baseline</h2>
+
+    <p>About halfway through the bonding period, I messaged my mentors about a few dependency issues I found in Mehrzad's branch, which I have also highlighted in the above section. One of my mentors, Tommaso Soru, replied with something that significantly changed the direction of my preparation. He and my other mentor Abdulsobur had already built and submitted a full agentic KGQA system to the Text2SPARQL 2026 challenge in April, and he shared the repository with me as the new baseline.</p>
+
+    <p>The system, called agentic-kgqa, is a pure Python pipeline without any agentic framework. It does entity linking via a shared Redis server preloaded with DBpedia surface forms, ontology lookup via word2vec embeddings over DBpedia properties, LLM-based SPARQL generation, and a self-correction loop that retries up to two times on failure. It supports multiple LLM backends through OpenRouter.</p>
+
+    <p>They submitted two versions to the challenge, one powered by Claude Sonnet and one by Qwen 3.5 122B. The official results on the DB26 DBpedia track:</p>
+
+    <ul>
+      <li>LIBER-AI-CLAUDE: 34.83% F1</li>
+      <li>LIBER-AI-QWEN: 27.45% F1</li>
+    </ul>
+
+    <p>These are the real baselines for this summer. Not Mehrzad's BLEU scores from 2023.</p>
+
+    <p>I spent the rest of the bonding period getting the system running locally. This involved downloading the ontology vectors file Tommaso shared, pulling the DBpedia 2015-10 dataset files, loading them into a local Oxigraph instance running in Docker, and starting the FastAPI server. After some dependency debugging and a lenient reload of the mappingbased_objects file to get past a parse error, the full pipeline worked end to end.</p>
+
+    <p>I tested it on a few questions. The Keanu Reeves birthplace query went through all five stages correctly: question analysis, Redis entity linking, ontology embedding lookup, SPARQL generation, and execution against the local Oxigraph endpoint. It returned Beirut on the first attempt with no revision needed.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Coding starts May 25th. The first thing on the list is understanding exactly where the current system fails and why, using the per-question breakdown from the Text2SPARQL results. The docs/analysis.md file in the repo documents nine prompt versions and concludes that 22% structural accuracy appears to be the ceiling for prompt engineering alone on this task and model combination.</p>
+
+    <p>My goal this summer is to push past the 34.83% F1 baseline by adding a FAISS vector fallback for entity linking on ambiguous mentions, improving the ontology exploration step to reduce predicate hallucinations, and running a full evaluation against the QALD-9-plus benchmark which the current system has not been tested on.</p>
+
+    <p>There is a community call on May 22nd with all GSoC '26 DBpedia contributors and mentors. Looking forward to it.</p>
+  </div>
+</main>
+
+<footer>
+  <p>© 2026 Malla Siddharth Reddy</p>
+</footer>
+
+</body>
+</html>
