@@ -30,7 +30,18 @@
     <h1>Agentic Question Answering over DBpedia</h1>
     <p class="item-subtitle">GSoC 2026 @ DBpedia</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <h2>Project Summary</h2>
+    <p>Accessing the billions of facts stored in DBpedia's knowledge graph currently requires writing SPARQL queries, putting this incredible resource out of reach for most people. This project tackles that by building a self-correcting Agentic Question Answering system over DBpedia using LangGraph and Qwen3.</p>
+    <p>Rather than attempting one-shot translation like existing Neural SPARQL Machine approaches, which frequently fail when a model hallucinates a property or misresolves an entity, the system grounds the entire reasoning process through a pipeline of deterministic tools. This includes an Entity Linker with a GraphRAG FAISS fallback for ambiguous mentions, a live Ontology Explorer that discovers what predicates actually exist for a given entity, and a Schema Introspector that validates property types before query construction.</p>
+    <p>The core contribution is a conditional self-correction loop where a Validator node diagnoses exactly what went wrong and dynamically routes the agent back to the specific tool needed to fix it, whether that is the entity linker, the predicate explorer, or the query builder. This enables the system to recover from failures instead of collapsing silently. The final pipeline will be rigorously benchmarked against QALD-9-plus and the DB25 dataset from the Text2SPARQL 2026 challenge.</p>
+
+    <h2>Mentors</h2>
+    <p>Tommaso Soru, Ronit Banerjee, Abdulsobur, Gandharva Naveen</p>
+
+    <h2>Keywords</h2>
+    <p>Python, RDF, SPARQL, DBpedia, LLM, FAISS, Ollama, LangGraph, Machine Learning, Information Retrieval, NLP, Knowledge Graphs, Question Answering, RAG, Agentic AI</p>
+  </div>
 </main>
 
 <footer>
