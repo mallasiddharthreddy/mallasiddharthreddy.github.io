@@ -93,13 +93,15 @@
 
     <p>I tested it on a few questions. The Keanu Reeves birthplace query went through all five stages correctly: question analysis, Redis entity linking, ontology embedding lookup, SPARQL generation, and execution against the local Oxigraph endpoint. It returned Beirut on the first attempt with no revision needed.</p>
 
+    <h2>Community Call</h2>
+
+    <p>We also had a community call on May 22nd with all the accepted GSoC 2026 DBpedia contributors and mentors. Julia, followed by Tommaso, from the DBpedia Association kicked things off with a briefing on how the program works, shared some interesting statistics about DBpedia's GSoC history like how many students were accepted each year and how many continued contributing after GSoC ended, and gave us tips on having a successful summer including communicating regularly with mentors and documenting progress through blogs. Each contributor then introduced themselves and their project in about a minute. There was a Q&amp;A session after where mentors answered questions from the group. We ended with everyone turning their cameras on for a group photo.</p>
+
     <h2>What's Next</h2>
 
     <p>Coding starts May 25th. The first thing on the list is understanding exactly where the current system fails and why, using the per-question breakdown from the Text2SPARQL results. The docs/analysis.md file in the repo documents nine prompt versions and concludes that 22% structural accuracy appears to be the ceiling for prompt engineering alone on this task and model combination.</p>
 
     <p>My goal this summer is to push past the 34.83% F1 baseline by adding a FAISS vector fallback for entity linking on ambiguous mentions, improving the ontology exploration step to reduce predicate hallucinations, and running a full evaluation against the QALD-9-plus benchmark which the current system has not been tested on.</p>
-
-    <p>There is a community call on May 22nd with all GSoC '26 DBpedia contributors and mentors. Looking forward to it.</p>
   </div>
 </main>
 
