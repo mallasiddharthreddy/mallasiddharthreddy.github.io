@@ -30,7 +30,53 @@
     <h1>Coding Week 1</h1>
     <p class="item-subtitle">May 25 to May 31, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Coding phase officially started on May 25th and I jumped straight into the entity linker, which is the first node in the pipeline according to my proposal. The goal for this week was not to write production code right away but to first understand the existing system properly, benchmark it, and nail down the design before building anything.</p>
+
+    <h2>Understanding the Existing System</h2>
+
+    <p>The first thing I did was go through the existing entity linking implementation in the agentic-kgqa repo in detail. The current system uses a Redis server preloaded with around 23 million surface forms derived from Wikipedia anchor text. When we query something like "Keanu Reeves", Redis looks up all the Wikipedia anchors that ever pointed to a DBpedia entity and returns the top matches ranked by how frequently they appeared. It is fast, works well for common well known entities, and is already part of the existing pipeline.</p>
+
+    <h2>Benchmarking Redis on DB25</h2>
+
+    <p>I wrote a testing script to run the Redis entity linker against all 100 DB25 benchmark questions. The approach was simple. I extracted the correct entity URIs from the gold standard SPARQL queries, converted them to natural surface forms, queried Redis with those, and checked whether Redis returned the correct entity in its top results.</p>
+
+    <p>Results: Redis achieved 96% accuracy across 100 entity lookups. The 4 failures were all specific edge cases:</p>
+
+    <ul>
+      <li>Special characters in entity names like "Republic of Montenegro (1992–2006)" where the date range caused a no result.</li>
+      <li>Bracket qualifiers being stripped incorrectly where "Casablanca (film)" became "Casablanca film" and Redis could not find it.</li>
+      <li>"The Dark Knight (film)" had the same issue.</li>
+      <li>"General (United States)" also failed for the same reason.</li>
+    </ul>
+
+    <h2>Building the DBpedia Lookup API Wrapper</h2>
+
+    <p>My proposal had the DBpedia Lookup API as the primary retrieval layer with FAISS as a semantic fallback. So I built a standalone Python wrapper around lookup.dbpedia.org and tested it against the same inputs to compare.</p>
+
+    <p>The key finding from comparing both:</p>
+
+    <ul>
+      <li>For "NYC", Redis returns NRL Under-20s as the top result which is completely wrong. Lookup returns New York City first which is correct.</li>
+      <li>But then my mentor Tommaso tested "Varese" (his hometown) and the results flipped. Redis returned the city correctly at rank 1. Lookup returned the basketball team first.</li>
+    </ul>
+
+    <p>So neither system is strictly better than the other. Lookup handles abbreviations better in some cases, Redis handles common proper nouns better. Both have failure modes.</p>
+
+    <h2>Design Discussion with Mentors</h2>
+
+    <p>I shared these findings in the project Slack. Tommaso pointed out something important. The DBpedia Lookup API does not reason over its results, it just returns a ranked list. The actual gain comes from RAG which means retrieval from an index followed by an LLM picking the correct entity based on the question context. He also raised concerns about Lookup's reliability since the remote service has had downtime issues before and can sometimes return worse results than Redis for common entities.</p>
+
+    <p>His suggestion was Redis + LLM reasoning over the top-k candidates, always on. The LLM sees the original question and the top Redis candidates and picks the correct one. For "NYC" the LLM would look at the question "What is the population of NYC?" and the candidates (NRL Under-20s, New York City, New York Central Railroad) and obviously pick New York City. The reasoning handles the abbreviation problem without needing a separate retrieval system.</p>
+
+    <p>We had our first weekly meeting on Friday evening with mentors Gandharva Naveen and Ronit Banerjee. Went over the Week 1 findings and discussed the Redis + LLM reasoning direction. The approach was supported. Redis retrieves top-k candidates, the LLM reasons over them along with the original question to pick the correct entity. My mentor Tommaso also forked the agentic-kgqa repo into the official DBpedia GitHub organization so all my work now lives at github.com/dbpedia/agentic-kgqa on the gsoc-siddharth branch.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 2 is focused on implementing the Redis + LLM reasoning approach. I will wire the top-k Redis candidates into the LLM context so it can pick the correct entity based on question context. Once that is working I will also evaluate whether FAISS is still needed as a fallback for the cases where Redis returns nothing at all, or whether LLM reasoning alone handles those edge cases.</p>
+
+    <p>The entity linker node should be fully functional by the end of Week 2.</p>
+  </div>
 </main>
 
 <footer>
