@@ -30,7 +30,75 @@
     <h1>Coding Week 2</h1>
     <p class="item-subtitle">June 1 to June 7, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 1 ended with a clear plan: build the Redis + LLM reasoning approach, evaluate it properly on DB25, and integrate it into the production codebase. This week was about executing that plan, and it turned out to be slightly more challenging than I expected.</p>
+
+    <h2>Isolated Testing First</h2>
+
+    <p>Before touching any production code in agentic-kgqa, I set up a completely separate development folder on my local machine. The reasoning was straightforward. If I made changes directly to the main codebase and something broke, it would be hard to tell whether the break was from my logic or from some interaction with existing pipeline. Testing in isolation first meant I could validate the approach independently before integrating it.</p>
+
+    <p>The isolation folder had two scripts. The first replicated the already existing agentic-kgqa baseline exactly: entity mentions are extracted from the raw question using LLM, then query Redis, and check if the correct entity comes back at rank 1. The second was the new approach: use a Planner LLM to extract entity mentions from the raw question, then run Redis top-k retrieval, then have an LLM reason over the candidates using the original question as context. The LLM reasoning over the candidates is the primary differentiation.</p>
+
+    <h2>The Challenge with Qwen</h2>
+
+    <p>My first instinct was to test with Qwen 3.5 122B since it was already configured in the repo and I knew it was one of the models my mentors had used for the TEXT2SPARQL challenge. The problem showed up immediately.</p>
+
+    <p>Qwen kept returning empty entity lists for about half the benchmark questions. The Planner was supposed to output a JSON object with an "entities" key, but Qwen's thinking mode returns the final answer through a different field in the API response. The main content field comes back as None, which caused an AttributeError when I tried to call .strip() on it.</p>
+
+    <p>I added a None check and disabled thinking mode using extra_body={"thinking": False}, which fixed the crash. But even after that fix, Qwen was still too conservative. It evaluated only 55 out of 103 entity mentions across the 100 questions, skipping roughly half because the Planner returned nothing. The net gain was zero.</p>
+
+    <p>Switching to DeepSeek V3.2 fixed the extraction problem entirely. DeepSeek evaluated all 103 mentions and followed the extraction instructions precisely. One behaviour I noticed was that DeepSeek extracts "NYC" as written, while other models tend to expand it to "New York City" automatically. This precision turned out to matter because Redis does the lookup based on the exact surface form the Planner extracts. DeepSeek was confirmed as one of the better models for the entity linker node.</p>
+
+    <h2>Approach A vs Approach B</h2>
+
+    <p>With DeepSeek in place, I ran the full evaluation comparing two approaches across all 103 entity mentions.</p>
+
+    <p>Approach A was Redis top-1 with Planner extraction (the existing baseline strategy): take whatever entity Redis ranks first and use it. Approach B was Redis + LLM reasoning (new strategy): retrieve top-5 candidates and ask the LLM to pick the correct one based on the question context.</p>
+
+    <p>The disambiguation improvement showed up clearly on ambiguous names. For "Who is the director of Casablanca?", Redis top-1 returns the city of Casablanca because it has a higher surface form frequency than the film. The LLM sees the question mentions a director, understands this is about a film, and correctly picks Casablanca_(film) which was ranked 2 in Redis.</p>
+
+    <img src="images/casablanca-disambiguation.png" alt="Terminal output showing Casablanca disambiguation — Redis top-1 returns the city, LLM reasoning selects the film" />
+
+    <p>The Harry Potter case was the most interesting. For "Was Emma Watson a part of Harry Potter cast?", Redis top-1 returns Harry_Potter with a perfect score of 1.0. Harry_Potter_(film_series) appears further down the list with only 0.2735. The LLM sees the word "cast" in the question and moves the film series to the front.</p>
+
+    <img src="images/harry-potter-disambiguation.png" alt="Terminal output showing Harry Potter disambiguation — LLM reasoning selects Harry_Potter_(film_series) over Harry_Potter based on question context" />
+
+    <p>Final results across 103 entity mentions:</p>
+
+    <ul>
+      <li>Approach A (Redis top-1 with Planner extraction): 94/103 correct (91.3%)</li>
+      <li>Approach B (Redis + LLM reasoning): 96/103 correct (93.2%)</li>
+      <li>Net gain: +2, zero degradation</li>
+    </ul>
+
+    <p>The +2 with zero degradation was the target. LLM reasoning fixed the ambiguous cases without breaking anything that was already working.</p>
+
+    <h2>Dropping FAISS for Entity Linking</h2>
+
+    <p>My original proposal had FAISS as a semantic fallback for cases where Redis returns nothing. After running the evaluations, I looked carefully at the remaining failures. The Dark Knight, General (United States), and similar cases all had the same problem: the correct entity simply does not appear in Redis's top-20 results regardless of how high you set k. That is a coverage gap, not a ranking problem. FAISS over surface form embeddings would not help because the coverage gap exists at the data level, not the ranking level.</p>
+
+    <p>I brought this up with my mentor in our weekly meeting and he confirmed the same reasoning. He also pointed out that FAISS would be much more useful in the Ontology Explorer node instead, where you need semantic search over DBpedia predicates rather than entity names. My mentors have shared with me the full DBpedia OWL ontology file to help me get started in Week 3.</p>
+
+    <h2>Integrating into Production</h2>
+
+    <p>Once the approach was validated in isolation, I integrated it into src/agent.py. The changes were surgical by design. I added a DISAMBIGUATION_PROMPT constant copied directly from the isolation test, added a _disambiguate_entity() method to the KGQAAgent class, changed the Redis lookup from top-3 to top-5 candidates, and updated _link_entities() to accept the original question and call disambiguation when multiple candidates are returned.</p>
+
+    <p>One thing I got wrong initially was hardcoding the model for the disambiguation step. I added a DISAMBIGUATION_MODEL = "deepseek/deepseek-v3.2" constant at first, which the existing agentic-kgqa project code style does not do. Every other method in the codebase uses model or DEFAULT_MODEL so whatever the user selects in the UI flows through the entire pipeline. I removed the hardcoded constant and followed the same pattern.</p>
+
+    <p>There was also a bug I caught during testing: I was not passing the model parameter down through _link_entities() into _disambiguate_entity(). The disambiguation was defaulting to DEFAULT_MODEL (Gemini Flash) instead of whatever the user had selected, which meant DeepSeek-selected disambiguation was not actually using DeepSeek. One extra parameter fixed it.</p>
+
+    <p>After integration I tested with the live pipeline. Harry Potter now resolves to Harry_Potter_(film_series) when the question context contains words like "cast" or "actor".</p>
+
+    <img src="images/harry-potter-pipeline-ui.png" alt="Pipeline UI showing Harry Potter resolving to Harry_Potter_(film_series) based on question context" />
+
+    <p>An interesting observation from testing different models: Claude Sonnet 4.6 is better at picking the correct predicate downstream (choosing dbo:starring over dbp:starring), while DeepSeek is more precise at entity extraction. These are different nodes in the pipeline doing different things, and the model that works best for one step is not necessarily the best for another.</p>
+
+    <p>The new modified entity linking phase is now fully functional, which is the Week 2 goal.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 3 is focused on the Ontology Explorer and getting started on the Query Builder node. The Planner already extracts a relationship from the question such as "birthplace" or "cast member". The Ontology Explorer will take that relationship and search semantically over the DBpedia OWL ontology to find the most relevant predicates like dbo:birthPlace. These predicate candidates then get passed to the Query Builder, which picks the right one and generates the SPARQL query. The goal is to give the Query Builder precise, grounded options rather than having it reason from scratch over the entire ontology.</p>
+  </div>
 </main>
 
 <footer>
