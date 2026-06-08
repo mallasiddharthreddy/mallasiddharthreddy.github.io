@@ -39,13 +39,11 @@
 
     <p>The isolation folder had two scripts. The first replicated the already existing agentic-kgqa baseline exactly: entity mentions are extracted from the raw question using LLM, then query Redis, and check if the correct entity comes back at rank 1. The second was the new approach: use a Planner LLM to extract entity mentions from the raw question, then run Redis top-k retrieval, then have an LLM reason over the candidates using the original question as context. The LLM reasoning over the candidates is the primary differentiation.</p>
 
-    <h2>The Challenge with Qwen</h2>
+    <h2>The Challenge with Qwen (in Isolated Testing)</h2>
 
-    <p>My first instinct was to test with Qwen 3.5 122B since it was already configured in the repo and I knew it was one of the models my mentors had used for the TEXT2SPARQL challenge. The problem showed up immediately.</p>
+    <p>My first instinct was to test with Qwen 3.5 122B in the isolated environment since it was already configured in the repo. The problem showed up immediately in the isolation scripts.</p>
 
-    <p>Qwen kept returning empty entity lists for about half the benchmark questions. The Planner was supposed to output a JSON object with an "entities" key, but Qwen's thinking mode returns the final answer through a different field in the API response. The main content field comes back as None, which caused an AttributeError when I tried to call .strip() on it.</p>
-
-    <p>I added a None check and disabled thinking mode using extra_body={"thinking": False}, which fixed the crash. But even after that fix, Qwen was still too conservative. It evaluated only 55 out of 103 entity mentions across the 100 questions, skipping roughly half because the Planner returned nothing. The net gain was zero.</p>
+    <p>Qwen's thinking mode returns the final answer through a different API response field than standard models. The main content field comes back as None in the isolation environment, which caused an AttributeError. I added a None check and disabled thinking mode using extra_body={"thinking": False}, which fixed the crash. But even after that fix, Qwen was too conservative for strict JSON entity extraction in this isolated setup. It evaluated only 55 out of 103 entity mentions, skipping roughly half. The net gain was zero.</p>
 
     <p>Switching to DeepSeek V3.2 fixed the extraction problem entirely. DeepSeek evaluated all 103 mentions and followed the extraction instructions precisely. One behaviour I noticed was that DeepSeek extracts "NYC" as written, while other models tend to expand it to "New York City" automatically. This precision turned out to matter because Redis does the lookup based on the exact surface form the Planner extracts. DeepSeek was confirmed as one of the better models for the entity linker node.</p>
 
