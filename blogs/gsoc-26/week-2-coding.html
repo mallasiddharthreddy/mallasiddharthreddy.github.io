@@ -95,7 +95,7 @@
 
     <h2>What's Next</h2>
 
-    <p>Week 3 is focused on the Ontology Explorer and getting started on the Query Builder node. The Planner already extracts a relationship from the question such as "birthplace" or "cast member". The Ontology Explorer will take that relationship and search semantically over the DBpedia OWL ontology to find the most relevant predicates like dbo:birthPlace. These predicate candidates then get passed to the Query Builder, which picks the right one and generates the SPARQL query. The goal is to give the Query Builder precise, grounded options rather than having it reason from scratch over the entire ontology.</p>
+    <p>Week 3 is focused on the Ontology Explorer and the Schema Introspector node. The Planner already extracts a relationship from the question such as "birthplace" or "cast member". The Ontology Explorer will take that relationship and search semantically over the DBpedia ontology to find the most relevant predicates like dbo:birthPlace. The Schema Introspector will then enrich those predicate candidates with rdfs:domain and rdfs:range metadata from the OWL ontology. This precise structural information will then get passed to the Query Builder. The goal is to give the Query Builder precise, grounded options rather than having it reason from scratch over the entire ontology.</p>
   </div>
 </main>
 
