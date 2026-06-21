@@ -61,7 +61,7 @@
 
     <h2>Revisiting the Ontology Index</h2>
 
-    <p>During the Friday meeting, Tommaso pointed out that our index was missing dbp properties due to coverage gaps in the data sources we were using. The original index used the DBpedia NT file for dbo entries and a word2vec file for unique dbp entries. I switched the dbo source to the OWL file which has 3,818 entries versus the NT file's 3,572 and richer label coverage. For dbp properties I needed a better source that could provide the full set of available predicates.</p>
+    <p>During the Friday meeting, my mentors pointed out that our index was missing dbp properties due to coverage gaps in the data sources we were using. The original index used the DBpedia NT file for dbo entries and a word2vec file for unique dbp entries. I switched the dbo source to the OWL file which has 3,818 entries versus the NT file's 3,572 and richer label coverage. For dbp properties I needed a better source that could provide the full set of available predicates.</p>
 
     <p>The first challenge was the DBpedia SPARQL endpoint itself. Querying all dbp properties using a straightforward ?p a rdf:Property filter only returned around 1,780 results due to how Virtuoso handles the query internally. Broader queries using [] ?p [] to scan actual data triples triggered a silent abort from the endpoint, returning empty results without any error. After some investigation I found that anchoring the query to owl:Thing entities allows Virtuoso to use its internal subject-type index instead of scanning the entire graph, which prevents the timeout. The resulting query successfully returned dbp properties from actual usage rather than just those formally typed in the schema.</p>
 
@@ -73,7 +73,7 @@
 
     <img src="images/week4-db25-100-100.png" alt="DB25 evaluation showing 100/100 top-10 hit rate after index expansion" />
 
-    <p>Tommaso also confirmed in the meeting that the full set of unique dbp properties is closer to 53k when using the complete DBpedia Databus infobox dump rather than just the SPARQL endpoint results. Improving the embedding quality for abbreviated properties like dbp:ot where the label alone gives no semantic signal is an active area of exploration going into next week.</p>
+    <p>My mentors also confirmed in the meeting that the full set of unique dbp properties is closer to 53k when using the complete DBpedia Databus infobox dump rather than just the SPARQL endpoint results. Improving the embedding quality for abbreviated properties like dbp:ot where the label alone gives no semantic signal is an active area of exploration going into next week.</p>
 
     <h2>What's Next</h2>
 
