@@ -30,7 +30,49 @@
     <h1>Coding Week 4</h1>
     <p class="item-subtitle">June 15 to June 21, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 3 ended with the Ontology Explorer and Schema Introspector nodes integrated into production. This week the focus shifted to the Query Builder and Query Executor nodes, which are the two most directly responsible for the quality of generated SPARQL. I also revisited the ontology index itself after a Friday meeting discussion that surfaced a gap in dbp property coverage.</p>
+
+    <h2>Enriching the Planner Output</h2>
+
+    <p>The Query Builder's job is to generate a SPARQL query from the Planner's analysis. The Planner was previously returning three fields: entities, answer_type, and concepts. That was enough to generate simple queries but not sufficient for more complex ones involving aggregation, multi-entity joins, or type constraints.</p>
+
+    <p>I added three new fields to the Planner output. The aggregator field captures what kind of mathematical operation the question needs. COUNT for "how many", SUM for totals, ORDER_BY_DESC for "top N" rankings, GROUP_BY for grouped counts, or NONE for plain SELECT queries. The join_type field captures whether two entities in the question share something in common (INTERSECTION), relate to either entity separately (UNION), or the question involves a single entity (SINGLE). The has_type_filter field is a boolean that signals whether the question asks about a specific category like "which movies" or "list the companies", which tells the Query Builder to add an rdf:type constraint.</p>
+
+    <p>These three fields directly address failure patterns observed in our DB25 and DB26 evaluations. Questions like "How many movies did Nolan direct?" previously generated plain SELECT queries. With aggregator=COUNT the Query Builder now generates SELECT DISTINCT COUNT correctly. Questions like "Where were JK Rowling and Sarami born?" previously generated UNION patterns when they should use a shared variable intersection pattern instead.</p>
+
+    <img src="images/week4-planner-output.png" alt="Planner output showing the new aggregator, join_type, and has_type_filter fields" />
+
+    <h2>Separating Classes from Properties in Context</h2>
+
+    <p>The Ontology Explorer returns a ranked list of candidates that mixes OWL Classes like dbo:Actor and OWL Properties like dbo:starring together. Previously these were formatted as a flat list and sent to the Query Builder, which sometimes used a Class as a predicate or a Property in an rdf:type position.</p>
+
+    <p>I updated the context formatting to separate the results into two clearly labelled sections. Properties appear under a section that instructs the Query Builder to use them as predicates. Classes appear under a separate section that instructs it to use them only for rdf:type constraints and never as predicates. Each Property entry also shows its rdfs:domain and rdfs:range from the Schema Introspector, so the Query Builder sees structured information about what types go on the left and right side of each triple.</p>
+
+    <h2>Improving the SYSTEM_PROMPT</h2>
+
+    <p>The Query Builder's SYSTEM_PROMPT received a significant update to match what the Planner now provides. The updated prompt has explicit rules for each aggregator type explaining exactly what SPARQL syntax to use. It has rules for join type where INTERSECTION means a shared variable pattern and UNION means separate branches. It has triple direction guidance that tells the Query Builder to use rdfs:domain and rdfs:range to determine which entity goes on the left as the subject and which goes on the right as the object. It also has a multi-entity rule that explains the difference between AND and OR in natural language and how they map to INTERSECTION and UNION in SPARQL.</p>
+
+    <h2>Cleaning Up the Query Executor</h2>
+
+    <p>The Query Executor handles what happens when the generated SPARQL returns zero results. The original approach asked the LLM to try a dbo to dbp namespace swap as one of its revision strategies. This was unreliable because the LLM sometimes skipped the swap or applied it incorrectly.</p>
+
+    <p>I replaced this with a deterministic Python step. After the first execution fails, the Executor now runs a simple string replacement swapping every http://dbpedia.org/ontology/ to http://dbpedia.org/property/ before attempting LLM revision. This is guaranteed to happen correctly every time, which removes one variable from the LLM's revision task. The LLM revision prompt was also updated to remove the swap instruction since it is now handled deterministically. The revised execution order is: execute original query, swap dbo to dbp and execute again if needed, then fall back to LLM revision for more complex fixes like removing rdf:type constraints or trying synonym predicates.</p>
+
+    <h2>Revisiting the Ontology Index</h2>
+
+    <p>During the Friday meeting, Tommaso pointed out that our index was missing dbp properties due to coverage gaps in the data sources we were using. The original index used the DBpedia NT file for dbo entries and a word2vec file for unique dbp entries.</p>
+
+    <p>I switched the dbo source to the OWL file which has 3,818 entries versus the NT file's 3,572 and has richer label coverage. For dbp properties I used the DBpedia SPARQL endpoint with an owl:Thing anchor query that bypasses Virtuoso timeout limitations. The query was run in two paginated requests of 10k each and saved as local RDF files. After filtering out dbo equivalents, URL-encoded names, single-character abbreviations, and names starting with digits, the combined index grew to 16,131 entries. DB25 top-10 hit rate improved to 100/100 and DB26 top-10 maintained at 50/50.</p>
+
+    <img src="images/week4-db25-100-100.png" alt="DB25 evaluation showing 100/100 top-10 hit rate after index expansion" />
+
+    <p>This work is still evolving. Tommaso confirmed in the meeting that the full set of unique dbp properties is closer to 53k when using the complete DBpedia Databus infobox dump rather than just the SPARQL endpoint results. Improving the embedding quality for abbreviated properties like dbp:ot where the label alone gives no semantic signal is an active area of exploration going into next week.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 5 will focus on two parallel tracks. The first is the LangGraph transformation, wiring all existing nodes into a proper StateGraph with typed state, conditional edges, and the Validator node for intelligent routing of failed queries back to the appropriate upstream node. The second is continuing the ontology index work, processing the full 53k dbp properties from the Databus infobox dump and exploring AI-assisted label enrichment for abbreviated property names so the Ontology Explorer can retrieve them reliably from natural language queries.</p>
+  </div>
 </main>
 
 <footer>
