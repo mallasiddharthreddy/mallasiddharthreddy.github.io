@@ -73,7 +73,7 @@
 
     <p>The five nodes are Planner, Entity Linker, Ontology Explorer, Query Builder, and Query Executor. The Ontology Explorer node also internally runs the Schema Introspector, so domain, range, and all dbp metadata gets appended to candidates before they reach the Query Builder. The graph is compiled once and reused across calls.</p>
 
-    <p>KGQAAgent.answer() was updated to invoke the compiled graph. Since the already existing CorporateKGQAAgent (designed for a seperate Corporate Dataset, beyond our project scope) is a subclass that overrides individual methods, routing it through the graph would bypass those overrides entirely. I added a type(self) is KGQAAgent guard so subclasses fall back to a _answer_sequential() method that preserves the original sequential behaviour. This shipped as three separate commits to the production repo.</p>
+    <p>KGQAAgent.answer() was updated to invoke the compiled graph. Since the already existing CorporateKGQAAgent (designed for a separate Corporate Dataset, beyond our project scope) is a subclass that overrides individual methods, routing it through the graph would bypass those overrides entirely. I added a type(self) is KGQAAgent guard so subclasses fall back to a _answer_sequential() method that preserves the original sequential behaviour. This shipped as three separate commits to the production repo.</p>
 
     <h2>Processing the DBp Property Dataset</h2>
 
