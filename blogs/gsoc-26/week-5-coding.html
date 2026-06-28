@@ -130,9 +130,9 @@ log(max_triple_count) is a constant derived from the data itself, it's not somet
 
     <h2>What's Next</h2>
 
-    <p>Week 6 will focus on finalising the approach for the Ontology index work based on Friday's meeting discussion and porting all isolation environment changes to production with one-by-one commits. The Validator node is the main new node to build, it sits after the Query Executor, handles failure routing back to the Query Builder with enriched context from live DBpedia property probing, and decides when to give up.</p>
+    <p>Week 6 has two things to focus on. The first is finalising the ontology index approach, specifically exploring alternatives to AI labelling all 49k dbp properties since hallucinations at that scale are impossible to manually review. Once settled, all isolation environment changes will be ported to production with one-by-one commits.</p>
 
-    <p>The Answer Generator node is also planned for Week 6 as the final node in the pipeline, taking the validated result set and generating a natural language answer.</p>
+    <p>The second is building the Validator node, which sits after the Query Executor and handles failure routing back to the Query Builder with enriched context from live DBpedia property probing, deciding when to give up. The Answer Generator node is also planned for Week 6 as the final node in the pipeline, taking the validated result set and generating a natural language answer.</p>
   </div>
 </main>
 
