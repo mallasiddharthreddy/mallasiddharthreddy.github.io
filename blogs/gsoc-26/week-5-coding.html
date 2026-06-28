@@ -75,19 +75,23 @@
 
     <p>KGQAAgent.answer() was updated to invoke the compiled graph. Since the already existing CorporateKGQAAgent (designed for a seperate Corporate Dataset, beyond our project scope) is a subclass that overrides individual methods, routing it through the graph would bypass those overrides entirely. I added a type(self) is KGQAAgent guard so subclasses fall back to a _answer_sequential() method that preserves the original sequential behaviour. This shipped as three separate commits to the production repo.</p>
 
-    <h2>Building the Two-Index Ontology Architecture</h2>
+    <h2>Processing the DBp Property Dataset</h2>
 
     <p>The bigger challenge this week was the dbp index. The core problem is that DBpedia has two namespaces: dbo, which is a curated OWL ontology with clean English labels, and dbp, which is raw Wikipedia infobox extraction with 56,000+ properties, many of them abbreviated or poorly named. A query for "overtime" should ideally find dbp:ot even though "overtime" and "ot" have almost no textual overlap.</p>
 
-    <p>The first thing I noticed when thinking about the index was the scale imbalance. There are roughly 3,680 dbo properties and 49,957 dbp properties, which is about 1 dbo for every 13 dbp. If we mix both into a single index, the sheer volume of dbp entries buries the dbo results. A query for "birthplace" returns dbo:birthPlace at rank 1 with high cosine similarity, but that one result is competing against hundreds of dbp candidates that all have slightly lower scores, and the top-10 window quickly fills up with dbp noise.</p>
+    <p>I downloaded the complete DBpedia Databus infobox dump (113M triples) and extracted per-property metadata for all 56k dbp properties including triple count, rank, sample subjects, and sample values. After filtering out dbo equivalents, URL-encoded names, single-character abbreviations, and properties with only symbol values, I was left with 48,957 clean dbp entries.</p>
+
+    <p>For label enrichment I used Qwen3 235B on my own AWS Bedrock account as a first pass to generate a short label and one-sentence description for each property using the sample subjects and values as context. For example, dbp:ot with sample subjects like "1919 Stanley Cup Finals" and sample values of 1, 2, 3 got labelled "overtime periods". A second pass with chain-of-thought reasoning cross-checked each label, and a third pass with Qwen 32B audited for hallucinations. The AI label is what makes abbreviated properties retrievable. Without it, dbp:ot embedded as just "OT" would never surface in the top-5 for an overtime query. Through this method of AI labelling, I managed to create a workable dbp metadata dataset for embedding, however this is not a 100% efficient process since AI labelling would introduce hallucinations which would be impossible for a human to manually review around 49k dbp properties.</p>
+
+    <img src="images/dbp-metadata.png" alt="dbp metadata screenshot" />
+
+    <h2>Building the Two-Index Architecture</h2>
+
+    <p>With the dbp entries processed and labelled, the next question was how to structure the index. The first thing I noticed was the scale imbalance. There are roughly 3,680 dbo properties and 48,957 dbp properties, which is about 1 dbo for every 13 dbp. If we mix both into a single index, the sheer volume of dbp entries buries the dbo results. A query for "birthplace" returns dbo:birthPlace at rank 1 with high cosine similarity, but that one result is competing against hundreds of dbp candidates that all have slightly lower scores, and the top-10 window quickly fills up with dbp noise.</p>
 
     <p>The solution I came up with was to keep dbo and dbp as entirely separate indexes. At query time, the concept is passed to both indexes independently and each returns its own top-5. This keeps the results balanced, always 5 dbo candidates and 5 dbp candidates, and the Query Builder gets a clean structured view of both namespaces without either drowning out the other completely.</p>
 
     <img src="images/ontology-explorer-num-locations.png" alt="Ontology Explorer output showing separate dbo and dbp sections for a concept like &quot;number of locations&quot;" />
-
-    <p>But two separate indexes alone do not fully solve the problem. For the dbp index specifically, camelCase splitting alone is not enough for abbreviated properties. dbp:ot split on camelCase is still just "ot", which will never surface for an overtime query. I downloaded the complete DBpedia Databus infobox dump (113M triples) and extracted per-property metadata for all 56k dbp properties including triple count, rank, sample subjects, and sample values. After filtering out dbo equivalents, URL-encoded names, single-character abbreviations, and properties with only symbol values, I was left with 48,957 clean dbp entries.</p>
-
-    <p>For label enrichment I used Qwen3 235B on my own AWS Bedrock account as a first pass to generate a short label and one-sentence description for each property using the sample subjects and values as context. For example, dbp:ot with sample subjects like "1919 Stanley Cup Finals" and sample values of 1, 2, 3 got labelled "overtime periods". A second pass with chain-of-thought reasoning cross-checked each label, and a third pass with Qwen 32B audited for hallucinations. The AI label is what makes abbreviated properties retrievable. Without it, dbp:ot embedded as just "OT" would never surface in the top-5 for an overtime query. Through this method of AI labelling, I managed to creata a workable dbp metadata dataset for embedding, however this is not a 100% efficient process since AI labelling would introduce hallucinations which would be impossible for a human to manually review around 49k dbp properties.</p>
 
     <h2>The Composite Scoring Formula</h2>
 
