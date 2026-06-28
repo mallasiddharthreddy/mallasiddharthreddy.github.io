@@ -30,7 +30,105 @@
     <h1>Coding Week 5</h1>
     <p class="item-subtitle">June 22 to June 28, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 4 ended with improvements to the Query Builder and Query Executor committed, and two open tasks: the LangGraph transformation still pending, and a known gap in dbp property coverage that needed more work. This week I tackled both, and it turned out to be the most intense week of the project so far — I spent around close to 40 hours across the week between the two tracks.</p>
+
+    <h2>LangGraph Transformation</h2>
+
+    <p>The first priority was wiring the entire pipeline into a proper LangGraph StateGraph. This required three things: defining a shared state that all nodes read from and write to, extracting each pipeline stage into a standalone function that takes state as input and returns a partial update, and wiring those functions into a compiled graph with linear edges.</p>
+
+    <p>I defined a <code>KGQAState</code> TypedDict with fields for everything the pipeline carries across nodes: the question, the model, the analysis from the Planner, linked entities, ontology terms, the generated SPARQL, the execution result, and attempt counts. Each of the five node functions reads what it needs from the state and returns only the fields it updates.</p>
+
+<pre><code>class KGQAState(TypedDict):
+    """Typed state that flows through all LangGraph nodes.
+
+    Each node receives the full state, performs its task, and returns
+    only the fields it updates. LangGraph merges updates back automatically.
+    """
+    # Input
+    question:         str
+    model:            Optional[str]
+
+    # Planner node output
+    entities:         list
+    concepts:         list
+    answer_type:      str
+    aggregator:       str
+    join_type:        str
+    has_type_filter:  bool
+
+    # Entity Linker node output
+    linked_entities:  dict
+
+    # Ontology Explorer + Schema Introspector node output
+    ontology_terms:   dict
+
+    # Query Builder node output
+    sparql:           str
+
+    # Query Executor node output
+    exec_result:      dict
+    attempts:         int
+    swap_attempted:   bool</code></pre>
+
+    <p>The five nodes are Planner, Entity Linker, Ontology Explorer, Query Builder, and Query Executor. The Ontology Explorer node also internally runs the Schema Introspector, so domain, range, and all dbp metadata gets appended to candidates before they reach the Query Builder. The graph is compiled once and reused across calls.</p>
+
+    <p><code>KGQAAgent.answer()</code> was updated to invoke the compiled graph. Since the already existing <code>CorporateKGQAAgent</code> (designed for a separate Corporate Dataset, beyond our project scope) is a subclass that overrides individual methods, routing it through the graph would bypass those overrides entirely. I added a <code>type(self) is KGQAAgent</code> guard so subclasses fall back to a <code>_answer_sequential()</code> method that preserves the original sequential behaviour. This shipped as three separate commits to the production repo.</p>
+
+    <h2>Building the Two-Index Ontology Architecture</h2>
+
+    <p>The bigger challenge this week was the dbp index. The core problem is that DBpedia has two namespaces: dbo, which is a curated OWL ontology with clean English labels, and dbp, which is raw Wikipedia infobox extraction with 56,000+ properties, many of them abbreviated or poorly named. A query for "overtime" should ideally find <code>dbp:ot</code> even though "overtime" and "ot" have almost no textual overlap.</p>
+
+    <p>The first thing I noticed when thinking about the index was the scale imbalance. There are roughly 3,680 dbo properties and 49,957 dbp properties, which is about 1 dbo for every 13 dbp. If we mix both into a single index, the sheer volume of dbp entries buries the dbo results. A query for "birthplace" returns <code>dbo:birthPlace</code> at rank 1 with high cosine similarity, but that one result is competing against hundreds of dbp candidates that all have slightly lower scores, and the top-10 window quickly fills up with dbp noise.</p>
+
+    <p>The solution I came up with was to keep dbo and dbp as entirely separate indexes. At query time, the concept is passed to both indexes independently and each returns its own top-5. This keeps the results balanced — always 5 dbo candidates and 5 dbp candidates — and the Query Builder gets a clean structured view of both namespaces without either drowning out the other completely.</p>
+
+    <img src="images/ontology-explorer-num-locations.png" alt="Ontology Explorer output showing separate dbo and dbp sections for the concept 'number of locations'" />
+
+    <p>But two separate indexes alone do not fully solve the problem. For the dbp index specifically, camelCase splitting alone is not enough for abbreviated properties. <code>dbp:ot</code> split on camelCase is still just "ot", which will never surface for an overtime query. I downloaded the complete DBpedia Databus infobox dump (113M triples) and extracted per-property metadata for all 56k dbp properties including triple count, rank, sample subjects, and sample values. After filtering out dbo equivalents, URL-encoded names, single-character abbreviations, and properties with only symbol values, I was left with 48,957 clean dbp entries.</p>
+
+    <p>For label enrichment I used Qwen3 235B on my own AWS Bedrock account as a first pass to generate a short label and one-sentence description for each property using the sample subjects and values as context. For example, <code>dbp:ot</code> with sample subjects like "1919 Stanley Cup Finals" and sample values of 1, 2, 3 got labelled "overtime periods". A second pass with chain-of-thought reasoning cross-checked each label, and a third pass with Qwen 32B audited for hallucinations. The AI label is what makes abbreviated properties retrievable. Without it, <code>dbp:ot</code> embedded as just "OT" would never surface in the top-5 for an overtime query. Through this method of AI labelling, I managed to create a workable dbp metadata dataset for embedding, however this is not a 100% efficient process since AI labelling would introduce hallucinations which would be impossible for a human to manually review across around 49k dbp properties.</p>
+
+    <h2>The Composite Scoring Formula</h2>
+
+    <p>One issue with using a single similarity score for dbp is that rare properties with only 1–2 triples in the knowledge graph look identical to common properties with millions of triples at the embedding level. A property like <code>dbp:placeOfDeath</code> with 16 triples semantically matches "place of death" very well but is almost never the right answer since <code>dbo:deathPlace</code> is the canonical property for this concept.</p>
+
+    <p>I designed a composite scoring formula for the dbp index that incorporates triple count as a support signal:</p>
+
+<pre><code>final_score = cosine_similarity × log(triple_count + 1) / log(max_triple_count + 1)</code></pre>
+
+    <p>The key design decision here was to avoid any free hyperparameters. <code>log(max_triple_count)</code> is a constant derived from the data itself — it's not something tunable. This makes the formula scientifically defensible to anyone viewing it. The formula down-weights rare properties without removing them entirely, which is important because some legitimate properties genuinely appear on only a handful of Wikipedia pages. The dbo index just uses pure cosine similarity since it is already curated and there is no need for support weighting.</p>
+
+    <p>My mentors further confirmed in a Slack discussion that the formula seems to be working correctly — <code>dbp:placeOfDeath</code> being omitted in favour of <code>dbo:deathPlace</code> is exactly the right behaviour.</p>
+
+    <h2>Benchmark Results</h2>
+
+    <p>DB25 index evaluation: 99/100 top-5 hit rate, 90/100 top-1 accuracy.</p>
+
+    <p>DB26 index evaluation: 46/50 top-5 hit rate, 44/50 top-1 accuracy.</p>
+
+    <p>The four DB26 misses are edge cases: one involves a property that requires date arithmetic in the gold query, one is a data snapshot difference, and two are concept keywords that don't match any dbp property name even with AI labels.</p>
+
+    <img src="images/db26-index-benchmark.png" alt="DB26 index benchmark output showing top-5 hit rate across all 50 questions" />
+
+    <h2>Evaluation Pipeline and a Key Discovery</h2>
+
+    <p>During evaluation I discovered that our local Oxigraph instance has zero <code>dbp:</code> triples. Only <code>dbo:</code> ontology data is loaded. This means that every query that uses a dbp property would simply return empty on Oxigraph. I rebuilt the evaluation pipeline to run generated queries against the live DBpedia endpoint and pre-computed all 50 DB26 gold results by executing the gold SPARQL queries against the same live endpoint. This gives a fair apples-to-apples comparison since both sides use the same data source.</p>
+
+    <p>Running the first 10 DB26 questions with this setup: result-set match 50%, average F1 0.53. Several failures are questions whose gold queries also return empty on live DBpedia due to differences between the 2015 DBpedia snapshot used for the TEXT2SPARQL challenge (which is the proper method of evaluating DB26 questions on) and the current live endpoint.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The most time-consuming part was the AI labelling pipeline for 48,957 dbp properties. Running three full passes on AWS required careful prompt engineering to get consistent output format across all properties. My mentors pointed out in the Friday meeting that some abbreviations like <code>dbp:ot</code> are genuinely ambiguous even with full context — it can mean overtime periods in some games and overtime scores in others. This is a fundamental characteristic of messy DBpedia extraction rather than a labelling problem, and handling it properly is an ongoing direction for next week.</p>
+
+    <p>The Oxigraph discovery was also significant. It reframed a lot of the earlier evaluation work and revealed that our preference for dbo is actually correct — where both <code>dbo:discoverer</code> and <code>dbp:discoverer</code> return true for the "Pluto and Clyde Tombaugh" question on the live endpoint, meaning our dbo-first approach gives the right answer regardless of which namespace the benchmark uses.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 6 will focus on finalising the approach for the Ontology index work based on Friday's meeting discussion and porting all isolation environment changes to production with one-by-one commits. The Validator node is the main new node to build — it sits after the Query Executor, handles failure routing back to the Query Builder with enriched context from live DBpedia property probing, and decides when to give up.</p>
+
+    <p>The Answer Generator node is also planned for Week 6 as the final node in the pipeline, taking the validated result set and generating a natural language answer.</p>
+  </div>
 </main>
 
 <footer>
