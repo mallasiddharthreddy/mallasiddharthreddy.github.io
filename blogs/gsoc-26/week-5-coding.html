@@ -118,7 +118,7 @@ log(max_triple_count) is a constant derived from the data itself, it's not somet
 
     <h2>Evaluation Pipeline and a Key Discovery</h2>
 
-    <p>During evaluation I discovered that our local Oxigraph instance has zero dbp: triples. Only dbo: ontology data is loaded. This means that every query that uses a dbp property would simply return empty on Oxigraph. I rebuilt the evaluation pipeline to run generated queries against the live DBpedia endpoint and pre-computed all 50 DB26 gold results by executing the gold SPARQL queries against the same live endpoint. This gives a fair apples-to-apples comparison since both sides use the same data source.</p>
+    <p>During end to end evaluation I discovered that our local Oxigraph instance has zero dbp: triples. Only dbo: ontology data is loaded. This means that every query that uses a dbp property would simply return empty on Oxigraph. I rebuilt the evaluation pipeline to run generated queries against the live DBpedia endpoint and pre-computed all 50 DB26 gold results by executing the gold SPARQL queries against the same live endpoint. This gives a fair apples-to-apples comparison since both sides use the same data source.</p>
 
     <p>Running the first 10 DB26 questions with this setup: result-set match 50%, average F1 0.53. Several failures are questions whose gold queries also return empty on live DBpedia due to differences between the 2015 DBpedia snapshot used for the TEXT2SPARQL challenge (which is the proper method of evaluating DB26 questions on) and the current live endpoint.</p>
 
