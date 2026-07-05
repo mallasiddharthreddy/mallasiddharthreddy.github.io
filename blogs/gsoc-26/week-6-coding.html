@@ -110,8 +110,6 @@ SELECT DISTINCT ?uri WHERE {
 
     <p>The Validator with the agentic probe successfully recovered several questions that previously failed outright. It is particularly effective for cases where dbp: properties that do not exist as dbo equivalents (hence the deterministic swap failed) can be found through the agentic probe method by hitting the endpoint and getting the existing dbp:properties and their values for that particular subject entity.</p>
 
-    <p>A fresh clean evaluation run on the final dbo-only production pipeline is planned for Week 7 to get a fully confirmed number with all fixes simultaneously in place. The full evaluation will also be done on DeepSeek and Qwen model as well to compare all 3 models.</p>
-
     <h2>Challenges</h2>
 
     <p>The main challenge was designing the controlled comparison between the two-index and dbo-only architectures cleanly. Several confounding factors had to be isolated: a transient endpoint timeout on one question, the class URI swap bug (which only manifested under dbo-only because the swap fires more often without upfront dbp candidates), and run-to-run LLM non-determinism at temperature=0. Each of these had to be identified and either fixed or accounted for before the comparison result was trustworthy.</p>
