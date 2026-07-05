@@ -127,6 +127,8 @@ SELECT DISTINCT ?uri WHERE {
     <p>Targeted improvements from the analysis done this week. The most promising ones are adding hop count as an explicit Planner output field so the Query Builder receives it as a structured signal, and routing the Validator back to the Entity Linker when the query structure looks correct but the entity URI is wrong (for example disambiguation suffixes like _(series) that produce dead URIs). Along with finding better methods to handle the unicode character problem in Redis since the current normalization solution may be too aggressive and could incorrectly normalize entities that legitimately contain special characters.</p>
 
     <p>Starting documentation and a proper README explaining the architecture, design decisions, and how to reproduce the evaluation results.</p>
+
+    <p>These tracks will continue across the remaining weeks of Phase 2, with additional iterative improvements naturally coming up as the evaluation results reveal new failure patterns and opportunities. Progress will be reported each week.</p>
   </div>
 </main>
 
