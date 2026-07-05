@@ -30,7 +30,106 @@
     <h1>Coding Week 6</h1>
     <p class="item-subtitle">June 29 to July 5, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 5 ended with two open tasks: finalising the ontology index approach (specifically finding an alternative to AI labelling 49k dbp properties) and building the Validator node. In week 6 I have delivered both, along with a significant architectural decision, several prompt and code fixes, and a clean production deployment. Answer generator node has been pushed to phase 2 of GSoC since it is not the priority for now.</p>
+
+    <h2>Dropping the AI-Labelled dbp Index</h2>
+
+    <p>The first open question from Week 5 was whether the two-index architecture (separate dbo and dbp indexes with AI-generated labels for dbp) was actually worth keeping. My mentors raised a valid concern in last week's Friday meeting: using an LLM to label 49k abbreviated properties is not scientifically defensible and efficient. The labelling process introduces hallucinations at a scale impossible to manually review, and a potential reviewer too would rightly question whether the results are reproducible or principled.</p>
+
+    <p>To settle this properly I ran a controlled comparison on the DB26 benchmark: the full two-index architecture against a dbo-only approach that drops the dbp embedding entirely and instead relies on the deterministic dbo to dbp namespace swap and the live agentic probe for recovery. After controlling for noise sources (timeout variance and a swap bug described below), the two approaches were statistically indistinguishable on DB26. The gap was within the run-to-run variance of the evaluation itself.</p>
+
+    <p>Given that result, the decision was straightforward: migrate to dbo-only. The architecture is simpler, fully defensible, and loses essentially nothing in practice. dbp properties still enter the pipeline through two mechanisms: the deterministic namespace swap in the Query Executor, and the live agentic probe in the Validator. Neither of these requires a static embedding index.</p>
+
+    <h2>The Validator Node</h2>
+
+    <p>The main engineering deliverable of the week was the Validator node, which sits after the Query Executor in the LangGraph graph and handles the decision of what to do when a query fails.</p>
+
+    <p>The Validator implements four rules in order. If the result (outputted by Query Executor) is good it passes immediately. If the maximum number of retries has been reached it gives up. If the endpoint is down it gives up. Otherwise it runs a two-stage agentic probe.</p>
+
+    <p>Stage 1 of the probe is a keyword-filtered SPARQL query that searches for dbp: properties on the subject entity whose names contain the concept keyword. For example if the concept is "number of locations" and the subject is Starbucks, Stage 1 searches for any dbp: property containing "location" and finds dbp:numLocations with value 22766. Stage 2 fires only if Stage 1 returns nothing: it fetches all dbp: properties for the subject entity without any keyword filter, giving the LLM a complete picture of what data actually exists for that entity.</p>
+
+    <p>Probe results are grouped by subject first, then by concept, so the Query Builder on retry knows exactly which property belongs to which entity. This matters for multi-entity questions where a flat concept-grouped result loses the subject association entirely. This 'agentic probe' is essentially a replacement for the 49k dbp's index. Since our preference is always dbo first, only if the executed query with dbo gives empty results, only then the agentic probe will be fired for only dbp properties, essentially telling the llm, these are all the properties that exist for this entity, use whats required and generate the query to obtain results.</p>
+
+    <p>If the probe finds useful data, the Validator routes back to the Query Builder with the probe results injected as grounded context. The Query Builder then uses these real confirmed property-value pairs instead of guessing from the static dbo index alone.</p>
+
+<pre><code>[VALIDATOR] Result needs fix (SELECT returned 0 results). Running agentic probe...
+  [VALIDATOR:PROBE] subject=Starbucks concept='number of locations'
+  [VALIDATOR:PROBE]   found numLocations = 22766
+[VALIDATOR] Probe found properties for 1 subject(s). Action: RETRY_QUERY_BUILDER
+[ROUTER] Routing back to Query Builder for retry
+
+[QUERY BUILDER] Retry #1 with probe context...
+[QUERY BUILDER] Generated:
+SELECT DISTINCT ?uri WHERE {
+  &lt;http://dbpedia.org/resource/Starbucks&gt; &lt;http://dbpedia.org/property/numLocations&gt; ?uri .
+}
+[EXECUTOR] Result: SELECT 1 rows -- PASS</code></pre>
+
+    <p>The graph now has a conditional edge from the Validator: pass and give_up both route to END, while retry_query_builder loops back to the Query Builder node. Maximum retries is set to 2.</p>
+
+    <h2>Prompt and Code Fixes</h2>
+
+    <p>Several targeted fixes were applied to the Planner and Query Builder system prompt after analysing failures in the DB26 evaluation.</p>
+
+    <p>The first was a SPARQL syntax bug. The LLM (Claude Sonnet, DeepSeek, Qwen), for 'count' related questions was always generating SELECT DISTINCT COUNT(?var) which is not valid SPARQL. The correct form is SELECT (COUNT(DISTINCT ?var) AS ?count). Every count query in the benchmark was producing invalid SPARQL. Fixing this alone recovered several questions.</p>
+
+    <p>The second was hop count reasoning. Several failures involved two-hop questions where the LLM collapsed two relationships into a single triple. For example "the origin of the genres of Back to Black" requires going from Back to Black to its genres and then from each genre to its stylistic origin, but the LLM was jumping directly from Back to Black to origin in a single triple. Adding an explicit hop count instruction to the prompt immediately fixed these cases.</p>
+
+    <p>The third was has_type_filter enforcement. The Planner was already outputting a has_type_filter field but the Query Builder was sometimes ignoring it and adding rdf:type constraints even when has_type_filter=False. It should only add the rdf:type constraint when the has_type_filter=True, which means the question is explicitly asking about a 'category'. The prompt was updated to make this a hard rule.</p>
+
+    <p>The fourth fix was the 'Unicode normalization' in the Entity Linker. Some entity URIs returned by Redis contain special Unicode characters (for example the okina in Hawaiʻi or the macron in Mānoa) that do not match DBpedia's standard ASCII resource URIs. A normalization step was added that strips combining diacritical marks from the URI's resource segment, converting Hawaiʻi to Hawaii and Mānoa to Manoa before querying the endpoint. This was identified as the only such case in the DB26 benchmark but the fix runs generally on all entity URIs. Hyphens and other common special characters are not stripped out, only the most uncommon ones are that do not make sense.</p>
+
+    <p>The final fix was the 'full formal name extraction' in the Planner. The Planner was sometimes abbreviating entity names, for example extracting "GNU license" instead of "GNU General Public License", which caused the Entity Linker to miss the correct Redis entry entirely. The Planner prompt was updated with an explicit instruction to always use the complete official name as it would appear in Wikipedia.</p>
+
+    <h2>Evaluation Fixes</h2>
+
+    <p>Two improvements were made to the evaluation harness itself.</p>
+
+    <p>The first was a gold result cache. Instead of re-executing all 50 gold SPARQL queries live against the endpoint on every evaluation run, we pre-execute them once and cache the results to disk. This eliminates gold-side timing variance between runs, meaning that we simply hit the endpoint with only our generated query and compare the results with the particular questions cached results.</p>
+
+    <p>The second was two narrow structural equivalence rules for the F1 scoring. The first handles arithmetic sign convention: if both the generated and gold results are a single numeric value, they are compared by absolute value rather than raw value, since the sign depends on which operand is subtracted from which and is an arbitrary modelling choice. The second handles extra columns: if gold asks for exactly one variable and our result contains that value plus additional columns with matching row counts, it counts as correct rather than being penalised for returning more information than asked.</p>
+
+    <h2>Bug Fix: Class URI Corruption in the Swap</h2>
+
+    <p>During analysis of failures in the dbo-only evaluation run, I noticed a bug in the deterministic dbo to dbp swap. The original implementation was a blind string replacement of every ontology/ URI with property/, including class URIs used in rdf:type constraints. There is no dbp: namespace equivalent for classes like dbo:FictionalCharacter or dbo:TelevisionShow, so the swap was silently turning valid class constraints into non-existent URIs that always return zero results.</p>
+
+    <p>The fix uses a regex that checks the local name of each URI before swapping. DBpedia's naming convention is that properties are lowerCamelCase and classes are UpperCamelCase. Only properties get swapped. Classes pass through untouched.</p>
+
+<pre><code>def _maybe_swap(match):
+    local_name = match.group(1)
+    if local_name and local_name[0].islower():
+        return f"http://dbpedia.org/property/{local_name}"
+    return match.group(0)  # leave class URIs (UpperCamelCase) untouched</code></pre>
+
+    <h2>Benchmark Results</h2>
+
+    <p>Benchmark Results using Claude Sonnet 4.6 as the generation model.</p>
+
+    <p>Running the full 50-question DB26 evaluation with most fixes applied:</p>
+
+    <p>Result-set match: 26/50 (52%)<br />Average F1: 0.59 (up from 0.32 at the start of the project)</p>
+
+    <p>The Validator with the agentic probe successfully recovered several questions that previously failed outright. It is particularly effective for cases where dbp: properties that do not exist as dbo equivalents (hence the deterministic swap failed) can be found through the agentic probe method by hitting the endpoint and getting the existing dbp:properties and their values for that particular subject entity.</p>
+
+    <p>A fresh clean evaluation run on the final dbo-only production pipeline is planned for Week 7 to get a fully confirmed number with all fixes simultaneously in place. The full evaluation will also be done on DeepSeek and Qwen model as well to compare all 3 models.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The main challenge was designing the controlled comparison between the two-index and dbo-only architectures cleanly. Several confounding factors had to be isolated: a transient endpoint timeout on one question, the class URI swap bug (which only manifested under dbo-only because the swap fires more often without upfront dbp candidates), and run-to-run LLM non-determinism at temperature=0. Each of these had to be identified and either fixed or accounted for before the comparison result was trustworthy.</p>
+
+    <p>The other challenge was figuring out the right scope for the column superset equivalence rule (where generated query returns extra context than expected query) in the evaluator. The goal was to avoid penalising queries that return the correct answer plus additional useful information, without accidentally giving credit to queries that return many answers where only one happens to match. The rule is strictly limited to cases where row counts match exactly and gold has exactly one output variable, which keeps it safe.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 7 shifts focus from building the pipeline to proving and improving it. The main tracks are:</p>
+
+    <p>Running the full evaluation on DB25 to test cross-benchmark generalisation. All work so far has been on DB26 and a second benchmark gives a much stronger evidence base.</p>
+
+    <p>Targeted improvements from the analysis done this week. The most promising ones are adding hop count as an explicit Planner output field so the Query Builder receives it as a structured signal, and routing the Validator back to the Entity Linker when the query structure looks correct but the entity URI is wrong (for example disambiguation suffixes like _(series) that produce dead URIs). Along with finding better methods to handle the unicode character problem in Redis since the current normalization solution may be too aggressive and could incorrectly normalize entities that legitimately contain special characters.</p>
+
+    <p>Starting documentation and a proper README explaining the architecture, design decisions, and how to reproduce the evaluation results.</p>
+  </div>
 </main>
 
 <footer>
