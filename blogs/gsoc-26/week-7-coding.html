@@ -86,10 +86,6 @@
 
     <p>The infrastructure for DB25 evaluation was also built this week: a gold result cache script that pre-executes all 100 gold queries once and saves the results to disk, eliminating gold-side timing variance between runs. The same approach was used for DB26.</p>
 
-    <h2>SPARQL Accuracy Comparison</h2>
-
-    <p>Beyond result-set F1, the pipeline was also evaluated on SPARQL structural accuracy (whether the generated query matches the gold query in terms of BGP nodes, predicates, inner operators, and outer structure). On DB25 with DeepSeek, the pipeline achieves 27% SPARQL accuracy. This is a meaningful result since the pipeline was designed to optimise for correct answers rather than exact query structure, meaning the result-set F1 of 0.53 on its own is the more relevant metric for practical use.</p>
-
     <h2>README and Documentation</h2>
 
     <p>A comprehensive README was published to the repository this week covering the full pipeline architecture, setup instructions from scratch, how to run evaluations, current benchmark results, and the key architectural decisions (dbo-only index, agentic probe, class-safe swap). This is the first proper documentation the repository has had since the project began.</p>
