@@ -106,7 +106,7 @@
 
     <p>The main tracks for the coming weeks are:</p>
 
-    <p>Targeted pipeline improvements from the failure analysis done this week. The most promising candidates are extending the Validator with a fourth routing option that detects when a subject entity returns no data at all from the live probe, which is a strong signal that the entity URI itself is wrong rather than the predicate. In such cases, instead of giving up, the Validator would route back to the Entity Linker with a cleaned version of the entity name (for example stripping disambiguation suffixes like _(series) that produce dead URIs in DBpedia). The second candidate is adding hop count as an explicit Planner output field so the Query Builder receives it as a structured signal rather than inferring it from natural language alone.</p>
+    <p>Targeted pipeline improvements from the failure analysis done this week. The first planned task is to extend the Validator node with a fourth routing option that detects when a subject entity returns no data at all from the live agentic probe, which is a strong signal that the entity URI itself is wrong rather than the predicate. In such cases, instead of giving up, the Validator would route back to the Entity Linker with a cleaned version of the entity name (for example stripping disambiguation suffixes like _(series) that produce dead URIs in DBpedia). The second task is adding hop count as an explicit Planner output field so the Query Builder receives it as a structured signal rather than inferring it from natural language alone.</p>
 
     <p>Evaluating on the QALD-9-Plus dataset (DBpedia subset) as a third benchmark for further cross-dataset generalisation.</p>
 
