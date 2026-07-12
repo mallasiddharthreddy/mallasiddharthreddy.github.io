@@ -30,7 +30,89 @@
     <h1>Coding Week 7</h1>
     <p class="item-subtitle">July 6 to July 12, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 6 ended with the dbo-only pipeline fully deployed to production, a working Validator node with agentic probe, and several prompt and evaluation harness fixes. Week 7 shifts focus entirely to evaluation. Running the pipeline across multiple models and benchmarks, understanding where it succeeds and where it fails, and setting up the infrastructure for clean, reproducible comparisons going forward.</p>
+
+    <h2>Cross-Model Evaluation on DB26</h2>
+
+    <p>The primary goal this week was to run the full 50-question DB26 evaluation across all three models the project is working with: Claude Sonnet 4.6, DeepSeek v3.2, and Qwen 3.5 122B.</p>
+
+<pre><code>json{
+  "benchmark": "DB26",
+  "questions": 50,
+  "results": {
+    "Claude Sonnet 4.6":  { "result_set_match": "24/50 (48%)", "avg_f1": 0.55 },
+    "DeepSeek v3.2":      { "result_set_match": "18/50 (36%)", "avg_f1": 0.41 },
+    "Qwen 3.5 122B":      { "result_set_match": "21/50 (42%)", "avg_f1": 0.45 }
+  }
+}</code></pre>
+
+    <p>Claude Sonnet 4.6 remains the strongest model by a clear margin. DeepSeek and Qwen are reasonable open-source baselines, with Qwen slightly ahead of DeepSeek after the fix described below. The baseline at the start of the project was F1=0.32, so all three models are now significantly above that.</p>
+
+    <h2>Fixing Qwen's NoneType Response Issue</h2>
+
+    <p>During the first Qwen evaluation run, 12 out of 50 questions crashed the pipeline with an error: expected string or bytes-like object, got 'NoneType'. This meant the Qwen API was returning an empty response for those questions. It was not a refusal, just a Null content field.</p>
+
+    <p>The pattern was clear: all 12 affected questions were complex multi-hop, aggregation, or multi-entity questions. Qwen handled simple ASK questions (yes/no questions) and single-hop SELECT questions without any issue. The empty responses only appeared on questions that required more internal reasoning.</p>
+
+    <p>The fix was to add retry logic directly in the LLM call. When the response content is None, retry the same call up to a maximum of 3 times before failing. Since Claude and DeepSeek never return None in practice, the retry loop exits on the first attempt for those models with zero extra cost. For Qwen too, most of the questions (38/50) succeed in the first try itself, meaning no extra costs. For the remaining 12 the retry succeeds on the second or third attempt in most cases since the empty responses are transient rather than systematic.</p>
+
+<pre><code>python
+for attempt in range(3):
+    response = client.chat.completions.create(
+        model=model, messages=messages,
+        temperature=0, max_tokens=max_tokens
+    )
+    content = response.choices[0].message.content
+    if content is not None:
+        break</code></pre>
+
+    <p>After applying this fix, the pipeline errors dropped from 12 to 1 on the same benchmark. The remaining single error (Q5, a complex full-scan taxonomic query) is a known difficult question that all three models struggle with.</p>
+
+    <h2>Adding DB25 as a Second Benchmark</h2>
+
+    <p>Week 7 also added DB25 (the 2025 edition of the Text2SPARQL benchmark, 100 questions) as a second evaluation dataset. The motivation is cross-benchmark generalisation: a pipeline that only performs well on one benchmark has limited scientific credibility. Running on a second dataset helps verify that the results are not specific to DB26.</p>
+
+<pre><code>json{
+  "benchmark": "DB25",
+  "questions": 100,
+  "results": {
+    "DeepSeek v3.2": { "result_set_match": "46/100 (46%)", "avg_f1": 0.53 }
+  }
+}</code></pre>
+
+    <p>DeepSeek achieves F1=0.53 on DB25, which is notably better than its DB26 performance (0.41). DB25 appears to contain more straightforward single-hop questions on average, making it a somewhat easier benchmark for the current pipeline.</p>
+
+    <p>It is worth noting that DB25 has some dataset-level limitations that affect evaluation reliability. Several gold queries use invalid SPARQL syntax (SELECT DISTINCT COUNT(?var) is not valid SPARQL, the correct form is SELECT (COUNT(DISTINCT ?var) AS ?count)), and several gold queries are so expensive that they time out even at 40 seconds on the evaluation endpoint. These questions automatically score zero regardless of what the pipeline generates, which means the actual pipeline performance on well-formed questions is better than the aggregate F1 suggests. For this reason, DB26 remains the primary evaluation benchmark going forward, with DB25 used as a secondary reference only.</p>
+
+    <p>The infrastructure for DB25 evaluation was also built this week: a gold result cache script that pre-executes all 100 gold queries once and saves the results to disk, eliminating gold-side timing variance between runs. The same approach was used for DB26.</p>
+
+    <h2>SPARQL Accuracy Comparison</h2>
+
+    <p>Beyond result-set F1, the pipeline was also evaluated on SPARQL structural accuracy (whether the generated query matches the gold query in terms of BGP nodes, predicates, inner operators, and outer structure). On DB25 with DeepSeek, the pipeline achieves 27% SPARQL accuracy. This is a meaningful result since the pipeline was designed to optimise for correct answers rather than exact query structure, meaning the result-set F1 of 0.53 on its own is the more relevant metric for practical use.</p>
+
+    <h2>README and Documentation</h2>
+
+    <p>A comprehensive README was published to the repository this week covering the full pipeline architecture, setup instructions from scratch, how to run evaluations, current benchmark results, and the key architectural decisions (dbo-only index, agentic probe, class-safe swap). This is the first proper documentation the repository has had since the project began.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The endpoint stability when running the DB25 evaluation and gold result cache was a real blocker this week. The evaluation endpoint went down twice during gold cache builds. Once mid-run, producing a half-built cache that had to be discarded and rebuilt. After the mentors increased the server swap to 8GB on the endpoint, the stability improved significantly, but the experience highlighted how dependent the evaluation pipeline is on endpoint availability. The gold cache approach (pre-executing gold queries once and reusing them) helps reduce the number of hits the endpoint sees, hence having reduced burden to execute more queries back to back.</p>
+
+    <p>The DB25 dataset limitations as mentioned in the previous section was also a challenge to reason about fairly. Deciding not to patch/correct the gold queries (even though fixing the COUNT syntax would be technically correct) seems to be the right call scientifically, since patching would make the gold results non-comparable to any other system evaluated on the same benchmark. Accepting the zero scores from broken gold queries and noting the limitation explicitly I feel was more honest.</p>
+
+    <h2>What's Next</h2>
+
+    <p>The pipeline has a concrete next milestone: breaching the F1=0.614 mark, which is currently 2nd place on the official Text2SPARQL 2026 leaderboard. This is the next target the mentors have set for the pipeline in the coming weeks. Since the full evaluation on Claude Sonnet is being held for a milestone run rather than regular iteration (due to high costs of the model), we will be using DeepSeek and Qwen for regular evaluations instead. The idea is that if a fix improves F1 on open-source models, it will improve on Claude too.</p>
+
+    <p>The main tracks for the coming weeks are:</p>
+
+    <p>Targeted pipeline improvements from the failure analysis done this week. The most promising candidates are fixing the entity linker to retry with stripped disambiguation suffixes (for cases like Oddworld_(series) where the full qualified name has no data in DBpedia), and adding hop count (for multi hop questions) as an explicit Planner output field so the Query Builder receives it as a structured signal rather than inferring it from natural language alone.</p>
+
+    <p>Evaluating on the QALD-9-Plus dataset (DBpedia subset) as a third benchmark for further cross-dataset generalisation.</p>
+
+    <p>Running evaluations again after each targeted fix using DeepSeek and Qwen to track whether improvements are measurable before the final Claude milestone run.</p>
+  </div>
 </main>
 
 <footer>
