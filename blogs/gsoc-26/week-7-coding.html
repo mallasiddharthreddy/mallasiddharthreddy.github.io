@@ -55,10 +55,9 @@
 
     <p>The pattern was clear: all 12 affected questions were complex multi-hop, aggregation, or multi-entity questions. Qwen handled simple ASK questions (yes/no questions) and single-hop SELECT questions without any issue. The empty responses only appeared on questions that required more internal reasoning.</p>
 
-    <p>The fix was to add retry logic directly in the LLM call. When the response content is None, retry the same call up to a maximum of 3 times before failing. Since Claude and DeepSeek never return None in practice, the retry loop exits on the first attempt for those models with zero extra cost. For Qwen too, most of the questions (38/50) succeed in the first try itself, meaning no extra costs. For the remaining 12 the retry succeeds on the second or third attempt in most cases since the empty responses are transient rather than systematic.</p>
+    <p>The exact root cause is unclear. It could be Qwen's internal reasoning mode consuming output tokens on complex questions and returning empty rather than truncated output, or it could be transient API behaviour on OpenRouter for longer generations. Either way, the fix is the same: add retry logic directly in the LLM call. When the response content is None, retry the same call up to a maximum of 3 times before failing. This is more cost efficient than simply increasing the token limit for all models, which would increase costs on every single call regardless of whether the problem occurs. The retry only fires an extra call when the response is actually empty.</p>
 
-<pre><code>python
-for attempt in range(3):
+<pre><code>for attempt in range(3):
     response = client.chat.completions.create(
         model=model, messages=messages,
         temperature=0, max_tokens=max_tokens
@@ -67,7 +66,7 @@ for attempt in range(3):
     if content is not None:
         break</code></pre>
 
-    <p>After applying this fix, the pipeline errors dropped from 12 to 1 on the same benchmark. The remaining single error (Q5, a complex full-scan taxonomic query) is a known difficult question that all three models struggle with.</p>
+    <p>Since Claude and DeepSeek never return None in practice, the retry loop exits on the first attempt for those models with zero extra cost. For Qwen, most questions (38/50) also succeed on the first try. For the remaining 12, the retry succeeded on the second or third attempt, dropping pipeline errors from 12 to 1 on the same benchmark. The remaining single error (Q5, a complex full-scan taxonomic query) is a known difficult question that all three models struggle with.</p>
 
     <h2>Adding DB25 as a Second Benchmark</h2>
 
