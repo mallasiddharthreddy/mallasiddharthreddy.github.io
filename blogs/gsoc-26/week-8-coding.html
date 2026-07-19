@@ -30,7 +30,78 @@
     <h1>Coding Week 8</h1>
     <p class="item-subtitle">July 13 to July 19, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 7 ended with a clear set of targets for Week 8: extend the Validator with dead URI detection, add hop count as an explicit Planner output field, and set up QALD-9-Plus as a third evaluation benchmark. All three were completed this week, along with a thorough failure analysis across all three models on DB26.</p>
+
+    <h2>Dead URI Detection in the Validator</h2>
+
+    <p>The first improvement came from a pattern identified in the Week 7 failure analysis. Few questions were giving up entirely because the subject entity URI returned zero properties even from the unfiltered probe. In DBpedia, a real resource that has data should almost always return at least some dbp: properties. When the unfiltered probe returns nothing at all, the most likely explanation is that the URI itself is wrong rather than the predicate.</p>
+
+    <p>A common cause of this is DBpedia disambiguation suffixes. When the Entity Linker gets a Redis miss for a surface form like "Oddworld (series)", it falls back to a naive heuristic that constructs a URI directly: Oddworld_(series). This URI does not exist as a real resource in DBpedia, the actual canonical resource is just Oddworld. The suffix _(series) is a disambiguation pattern, not part of the resource name itself.</p>
+
+    <p>The fix adds a new Rule 4.5 to the Validator node. When all subjects in the failing query return zero properties from the unfiltered probe, the Validator checks each subject URI for the _( disambiguation pattern. If found, it strips the suffix, constructs a cleaned URI, injects it into the state's linked entities, and routes back to the Query Builder for a retry with the corrected entity instead of giving up.</p>
+
+<pre><code>def _strip_disambiguation_suffix(uri: str):
+    if "/resource/" not in uri:
+        return None
+    prefix, resource = uri.split("/resource/", 1)
+    idx = resource.find("_(")
+    if idx == -1:
+        return None
+    return f"{prefix}/resource/{resource[:idx]}"</code></pre>
+
+    <p>Testing this on the Oddworld question confirmed the fix works end to end. The Validator detects the dead URI, strips the suffix, retries with the clean Oddworld resource, and the pipeline returns the correct publishers via dbp:publisher.</p>
+
+    <h2>Hop Count as an Explicit Planner Output Field</h2>
+
+    <p>The second improvement addresses a structural failure mode in multi-hop questions. Previously the Query Builder was inferring the number of relationship hops from natural language reasoning alone, which sometimes led it to collapse a two-hop question into a single triple even when that is structurally wrong.</p>
+
+    <p>The fix adds num_hops as a new field in the Planner's JSON output, alongside the existing aggregator, join_type, and has_type_filter fields. The Planner prompt was updated with clear rules and examples for when to output 1 versus 2 versus 3 hops. The Query Builder system prompt was updated to treat num_hops as a hard constraint: if num_hops=2, it must generate exactly two triples connected by an intermediate variable, never collapsing them into one.</p>
+
+<pre><code>{
+  "entities": ["Stewart Bovell"],
+  "concepts": ["military unit", "motto"],
+  "aggregator": "NONE",
+  "join_type": "SINGLE",
+  "has_type_filter": false,
+  "num_hops": 2
+}</code></pre>
+
+    <p>Testing on the Stewart Bovell motto question confirmed the fix. The Planner correctly outputs num_hops=2, and the Query Builder generates the two-hop structure Bovell -> militaryBranch -> ?unit -> motto -> ?answer on the first attempt. With Qwen, this question now passes with both correct mottos returned. Previously it was giving up with zero results.</p>
+
+    <h2>Setting Up QALD-9-Plus as a Third Benchmark</h2>
+
+    <p>The third track this week was adding QALD-9-Plus (DBpedia test set, 150 English questions) as an additional evaluation benchmark. The dataset was downloaded from the KGQA GitHub repository and the same gold cache infrastructure built for DB25 and DB26 was applied: a script that pre-executes all 150 gold SPARQL queries against the evaluation endpoint and saves the results to disk.</p>
+
+<pre><code>{
+  "benchmark": "QALD-9-Plus",
+  "questions": 150,
+  "gold_errors": 28,
+  "clean_gold": 122,
+  "error_breakdown": {
+    "timeouts": 4,
+    "invalid_count_syntax": 24
+  }
+}</code></pre>
+
+    <p>Like DB25, QALD-9-Plus has dataset-level limitations worth noting upfront. 24 of the 150 gold queries use invalid SPARQL aggregate syntax that the evaluation endpoint rejects with HTTP 400 errors. 4 questions time out even at 40 seconds due to expensive full-scan patterns. These 28 questions automatically score zero regardless of what the pipeline generates.</p>
+
+    <p>A more significant limitation is that a portion of QALD-9-Plus gold queries rely on dct:subject with DBpedia category URIs (the dbc: namespace). For example, "Who killed Caesar?" uses ?uri dct:subject dbc:Assassins_of_Julius_Caesar. The evaluation endpoint does not have DBpedia category triples loaded, so these queries return zero results on our endpoint. Of the 150 questions, only around 88 have clean, comparable gold results on the endpoint. The remaining 62 are affected by endpoint data limitations that are outside the scope of this project.</p>
+
+    <p>The core problem with evaluating on QALD-9-Plus is that even if our pipeline generates a perfectly correct answer for a question, the F1 score will still come out as zero if the gold result itself is empty due to these limitations. There is nothing to compare against. This makes it impossible to get a meaningful F1 score on a significant portion of the dataset regardless of pipeline quality. For these reasons QALD-9-Plus is treated as a supplementary benchmark only. The gold cache script and benchmark file have been added to the repository so the evaluation infrastructure is in place, but a full evaluation run is not a priority given the data comparability issues.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The main challenge this week was the num_hops field causing unexpected token truncation in Qwen on complex questions. The longer Planner prompt with detailed examples for each hop count value caused Qwen's internal reasoning to consume more of the output token budget, occasionally truncating the JSON response mid-way. This was observed as a tradeoff between prompt richness and Qwen's token consumption behaviour on complex questions. Claude and DeepSeek are unaffected since they do not exhibit the same pattern. Finding the right balance is an open problem for the coming weeks.</p>
+
+    <p>The QALD-9-Plus data compatibility issues were also a significant challenge to understand and document fairly. The dataset was built against a different DBpedia endpoint snapshot, and the category triple gap means a meaningful portion of questions simply cannot be evaluated on our endpoint in a comparable way.</p>
+
+    <h2>What's Next</h2>
+
+    <p>The next focus for Week 9 is running the full DB26 evaluation on Qwen with both the new improvements applied (dead URI detection and hop count) and the improvements listed below to get a fresh confirmed baseline and measure the net improvement. Fixes for this week include two targeted prompt improvements from the DB26 failure analysis: fixing incorrect triple direction for questions involving various relationships, and improving INTERSECTION join handling for questions asking what two entities share in common.</p>
+
+    <p>As an additional evaluation metric, the plan is to extend evaluate.py to also track the number of agent steps taken per question to reach a final answer, then report the average steps per question alongside the existing average F1. This gives a useful efficiency metric alongside accuracy, since a pipeline that answers correctly in fewer steps is generally preferable to one that needs multiple validator retries to get there.</p>
+  </div>
 </main>
 
 <footer>
