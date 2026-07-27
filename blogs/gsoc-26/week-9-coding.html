@@ -30,7 +30,66 @@
     <h1>Coding Week 9</h1>
     <p class="item-subtitle">July 20 to July 26, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 8 ended with the dead URI fix and hop count field in place along with the new benchmark of QALD-9-Plus, and three things left for Week 9: run a fresh DB26 evaluation with all improvements applied, implement the triple direction and INTERSECTION prompt fixes, and add the average steps metric to the evaluation harness. All three were done this week, and the analysis from the evaluation run also opened up a new direction for how the Query Builder node could be improved architecturally going forward.</p>
+
+    <h2>Prompt Fixes: Triple Direction and INTERSECTION</h2>
+
+    <p>The first track this week was implementing the two prompt fixes identified in the Week 8 failure analysis.</p>
+
+    <p>The triple direction fix addresses a class of questions where the model consistently generates the triple in the wrong direction. For "coached by", "trained by", and "managed by" questions, the person being coached is the subject of the triple and the coach is the object. Generating it the other way around always returns zero results since DBpedia does not store the relationship from the coach's perspective. The same pattern applies to political role questions: "who are the prime ministers of the UK" should generate ?person dbo:primeMinister &lt;United_Kingdom&gt; with the person as the unknown variable, not ?person rdf:type dbo:PrimeMinister which is a class that does not exist in DBpedia. Both of these are now explicit rules in the Query Builder system prompt with concrete examples.</p>
+
+    <p>The INTERSECTION fix clarifies the correct SPARQL pattern for questions asking what two entities share in common. The pattern is ?uri pred &lt;X&gt; . ?uri pred &lt;Y&gt; where the answer variable is the subject and both entity URIs are objects, connected by the same predicate. The previous prompt had this reversed. The updated prompt also makes it explicit that the entity URIs should come from the linked entities list rather than being guessed, which was causing wrong or missing URIs in the generated queries.</p>
+
+    <h2>Average Steps Per Question Metric</h2>
+
+    <p>The second track was adding an efficiency metric to the evaluation harness. The pipeline already tracks exec_attempts and validator_attempts per question, so computing steps was straightforward: sum both fields per question and report the average across all questions at the end of a run, alongside the existing average F1.</p>
+
+<pre><code>{
+  "avg_f1": 0.4639,
+  "avg_steps_per_question": 3.68,
+  "exec_fallback_breakdown": {
+    "dbo_to_dbp": 22,
+    "none": 28
+  }
+}</code></pre>
+
+    <p>The per-question step count also now shows inline during evaluation, making it easy to spot which questions are consuming the most retries. A question that passes in Steps=1 went through one executor attempt and no validator retries. Steps=8 means the pipeline exhausted all retry slots trying to answer it. The average of 3.68 across 50 questions gives a sense of how hard the pipeline is working on average, slightly higher than the 3.32 seen in an earlier run during the week. The increase reflects the pipeline attempting more retries on questions that were previously crashing silently, rather than a regression in efficiency.</p>
+
+    <p>The mentors also suggested going beyond just the average and also computing the median and mode of steps per question, which would give a more complete picture of the distribution. A high average pulled up by a few difficult questions looks very different from a uniformly high step count across all questions. This is planned for the coming week.</p>
+
+    <h2>DB26 Evaluation Run</h2>
+
+    <p>A full 50-question DB26 evaluation was run using Qwen to measure the combined impact of all improvements from Week 8 and 9. The result was 22/50 (44%) result-set matches with average F1=0.4639 and average steps per question of 3.68.</p>
+
+<pre><code>{
+  "result_set_matches": "22/50 (44%)",
+  "avg_f1": 0.4639,
+  "avg_steps_per_question": 3.68,
+  "exec_fallback_breakdown": {
+    "dbo_to_dbp": 22,
+    "none": 28
+  }
+}</code></pre>
+
+    <p>This is a small but real improvement over the previous Qwen baseline of 21/50 with F1=0.44. Notably there were zero pipeline errors in this run, meaning the retry logic is holding up and every question ran to completion. The increase in average steps from 3.32 to 3.68 reflects the pipeline working harder on previously-crashing questions rather than failing silently.</p>
+
+    <p>The numbers did not shift dramatically, and the failure analysis reveals why: the longer Planner prompt introduced for the num_hops field is causing Qwen to occasionally truncate its JSON response on complex questions due to token budget constraints. Some questions that were previously passing started failing due to this, which offsets the gains from the new improvements. Claude and DeepSeek are not affected by this since they handle longer prompts without the same token consumption behaviour. The true improvement from these fixes will be visible when the final Claude evaluation run is done.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The main challenge this week was understanding why the Qwen numbers did not improve despite the improvements being functionally correct. The triple direction fix was verified to work on targeted questions, and the steps metric is correct. The issue is specifically the interaction between the longer Planner prompt and Qwen's thinking mode token consumption. This is not something that can be fixed by further prompting since the fix itself is the source of the problem.</p>
+
+    <p>This led to a broader question about the current architecture: the Query Builder is being asked to do a lot through prompting alone, and the validator is the only mechanism for correcting its mistakes. When the validator exhausts its retries, the pipeline gives up. A more robust approach might be to give the Query Builder more autonomy to analyse its own failures and self-correct before involving the validator at all.</p>
+
+    <h2>What's Next</h2>
+
+    <p>The evaluation metric work continues next week with median and mode of steps per question alongside the existing average, giving a better picture of how the pipeline distributes its effort across different question types.</p>
+
+    <p>The bigger direction being explored is making the Query Builder node more self-sufficient. Instead of relying entirely on the prompt to handle every edge case and then falling back to the Validator for correction, the idea is to give the Query Builder a small internal loop of its own: generate a candidate query, check it for structural validity or obvious errors, and self-correct before passing it to the executor. This would reduce the number of validator retries needed for structural mistakes and make the pipeline more robust overall. This is still being thought through and will be explored in the coming weeks.</p>
+
+    <p>Running the final full evaluation on Claude for the true performance increase remains the key milestone. The prompt fixes verified this week are expected to recover several questions on Claude that were previously failing, which should push the overall F1 well past the current 0.55.</p>
+  </div>
 </main>
 
 <footer>
