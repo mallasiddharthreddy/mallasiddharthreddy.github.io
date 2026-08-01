@@ -30,7 +30,81 @@
     <h1>Coding Week 10</h1>
     <p class="item-subtitle">July 27 to August 2, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 9 ended with two things planned for Week 10: adding median and mode of steps per question to the evaluation harness, and exploring ways to make the Query Builder more self-sufficient so it relies less on the Validator to catch its mistakes. The steps metric work was completed as planned. The Query Builder exploration however led to somewhere different than expected: analysing why multi-hop questions were still failing showed the root cause was not in how the Query Builder generates queries, but in how the Validator probes for corrections afterward. That analysis produced a concrete fix in the Validator node instead.</p>
+
+    <h2>Median and Mode of Steps Per Question</h2>
+
+    <p>The first task was extending the steps metric added last week. The average alone can be misleading since a few very hard questions can pull it up while most questions actually resolve quickly. Median and mode give a fuller picture of the distribution.</p>
+
+<pre><code>{
+  "avg_steps_per_question": 3.82,
+  "median_steps_per_question": 2.0,
+  "mode_steps_per_question": 1
+}</code></pre>
+
+    <p>This confirmed that the average alone did not show the complete analysis clearly. The mode of 1 means the single most common outcome across all 50 questions is answering correctly on the first attempt with no retries at all. The median of 2 sits close to that, meaning half the questions resolve within two steps or fewer. The average of 3.82 being noticeably higher than both tells us it is being pulled up by a smaller set of genuinely hard questions that consume most or all of the retry budget, rather than the pipeline working hard uniformly across every question. Read together, the three numbers describe the pipeline as fast and confident on the majority of questions with a distinct hard tail, which is a more accurate picture than the average alone would give.</p>
+
+    <h2>Two-Hop Probe Chaining</h2>
+
+    <p>The bigger piece of work this week came from digging into why some two-hop questions were still failing even after the num_hops fix from Week 8 correctly generated the right query structure. The pattern that kept showing up was questions like "what is the land size of the country where Oxford is located." The Query Builder correctly generates a two-triple query connecting Oxford to its country and the country to its area, but when the specific property guessed for the second hop has no data, the Validator's agentic probe only ever checks Oxford for alternative properties. Oxford does not have land area data. The country does. The probe was structurally unable to find the answer because it was looking at the wrong entity.</p>
+
+    <p>The fix extends the Validator to detect this pattern directly. First it identifies whether the generated SPARQL has a two-hop shape at all, by checking whether the variable produced by the first triple is then reused as the subject of a second triple, which is the signature of a chained relationship rather than a single lookup.</p>
+
+<pre><code>def _find_intermediate_hops(sparql: str) -> list:
+    first_hop_triples = _FIRST_HOP_TRIPLE_RE.findall(sparql)
+    subject_var_re = re.compile(r"\?(\w+)\s+&lt;http://dbpedia\.org/")
+    vars_used_as_subject = set(subject_var_re.findall(sparql))
+    return [
+        (subj, pred, var)
+        for subj, pred, var in first_hop_triples
+        if var in vars_used_as_subject
+    ]</code></pre>
+
+    <p>Once an intermediate hop is identified, the Validator runs a small standalone query to resolve what that variable actually binds to, and then probes that resolved entity as well as the original subject.</p>
+
+<pre><code>def _resolve_intermediate_entities(sparql: str) -> list:
+    hops = _find_intermediate_hops(sparql)
+    resolved = []
+    for subj, pred, var in hops:
+        probe_query = f"""
+SELECT DISTINCT ?{var} WHERE {{
+  &lt;{subj}&gt; &lt;{pred}&gt; ?{var} .
+}}
+LIMIT 5
+"""
+        result = execute(probe_query, timeout=10)
+        if result["type"] == "select":
+            for row in result.get("rows", []):
+                val = row.get(var, "")
+                if val.startswith("http://dbpedia.org/resource/"):
+                    resolved.append(val)
+    return resolved</code></pre>
+
+    <p>For the Oxford example, this means resolving the country to United Kingdom and then probing the United Kingdom directly, which surfaces the actual area property that has data.</p>
+
+    <p>The fix is gated behind a single feature flag so it can be instantly reverted without touching any other code if it turned out to regress results. It was built and tested in the isolated development environment first, verified on individual questions with both Qwen and DeepSeek before being ported to production.</p>
+
+    <p>Testing confirmed the fix recovers the Oxford question and a related two-hop question about a military unit's motto on both the open source models, both of which were previously failing outright.</p>
+
+    <h2>DB26 Evaluation Run</h2>
+
+    <p>A full 50-question DB26 evaluation was run on Qwen after the fix to measure the actual impact rather than relying on individual question tests alone. Average F1 improved from 0.4639 to 0.5109. The per-question comparison confirmed the Oxford question moved from a complete failure to a full pass in this run, and several other questions that were previously scoring zero were partially improved, which explains the F1 gain.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The main challenge was confirming that an improvement verified on individual questions actually holds up in a full evaluation run, since the same question can behave differently across separate runs due to non-determinism in the underlying model calls even at temperature zero. One full DeepSeek run showed a small overall F1 drop despite the fix working correctly on targeted tests, and digging into the per-question comparison showed the drop came entirely from unrelated questions where the model happened to generate a different query on that particular run, not from anything related to the two-hop fix itself. This is a recurring theme with evaluating LLM-based pipelines: individual fixes need to be checked against full runs, and full runs need to be read carefully rather than taken at face value, since a single question's variance can move the aggregate number in either direction independent of what was actually changed.</p>
+
+    <p>The detection mechanism itself also has a natural boundary worth being upfront about. It relies on recognising a specific triple pattern in the generated SPARQL, so it catches two-hop questions where the intermediate variable is used cleanly as both an object and a subject, but not every two-hop question the model generates follows that exact shape. A handful of the remaining multi-hop failures fall outside this pattern for that reason. This is a known and accepted boundary of the current approach rather than something being actively chased down further, since the fix already recovers the cases it was designed for.</p>
+
+    <p>Cross-checking the failing questions against the original F1=0.55 Claude baseline from earlier in the project confirmed that both recovered questions were failing on that original run too, which gives good reason to expect the fix will show up as a real gain when the final Claude evaluation is done.</p>
+
+    <h2>What's Next</h2>
+
+    <p>Week 11 is the final week reserved for any code changes. Any last targeted improvements from failure analysis will happen then, after which the remaining time shifts entirely to the final evaluation run, documentation, and closing out the project.</p>
+
+    <p>The final full evaluation on Claude remains the key milestone, and with the prompt fixes and two-hop probe chaining verified this week, the expectation is a meaningful jump from the current 0.55 baseline once that run is done.</p>
+  </div>
 </main>
 
 <footer>
