@@ -30,7 +30,51 @@
     <h1>Coding Week 12</h1>
     <p class="item-subtitle">August 10 to August 16, 2026</p>
   </div>
-  <p>Content coming soon.</p>
+  <div class="prose">
+    <p>Week 11 closed with the plan for this week laid out clearly: run the final evaluations on Claude and Qwen, remove unused code across the repository, and reorganise the codebase so it is easier to read and understand for anyone picking it up after GSoC ends. All three happened this week, in that order, and each one fed into the next.</p>
+
+    <h2>Final Evaluation Runs</h2>
+
+    <p>With the pipeline improvements from the last five weeks locked in, the two milestone runs were done on the primary DB26 benchmark. Claude Sonnet 4.6 reached F1=0.6119, a 90% relative improvement over the pre-GSoC baseline of 0.32, and competitive with 2nd place on the official Text2SPARQL 2026 leaderboard. Qwen 3.5 122B reached F1=0.5109, a roughly 65% improvement over its own 0.31 baseline. A supplementary DeepSeek run on the secondary DB25 benchmark reached F1=0.5538.</p>
+
+    <p>To make sense of what was still failing rather than just reporting the headline number, every failing question on DB26 was read individually against its validator action, validator reason, and generated SPARQL, for both models. 22 of the hardest questions turned out to fail on both Claude and Qwen, which is a good sign for the architecture: what is left unsolved is mostly a structural limitation of the pipeline itself, not a weakness specific to either model. This turned into a full categorised breakdown covering seven failure patterns, from questions with no entity to anchor a probe on, to cases where a fix already exists but did not trigger reliably on that particular run, written up in a dedicated results document rather than left as scattered notes.</p>
+
+    <h2>Removing Redundant Code</h2>
+
+    <p>The corporate agent variant, an early exploratory branch of the pipeline for a different, non-DBpedia dataset, had not been touched in a long time and was confirmed no longer needed. Removing it surfaced a second, less obvious layer of cleanup: a class-override pattern in the main agent file existed only to support that variant's customisation points. With the variant gone, an entire sequential fallback path, unused now for weeks, could be removed too, along with the module-level helper functions that only that path called.</p>
+
+    <p>The QALD-9-Plus benchmark integration from earlier in the project was also removed. It had already been set aside after a compatibility check showed a large share of its gold queries either use invalid SPARQL syntax or depend on data not present on the evaluation endpoint, making it unsuitable for a fair comparison. The gold cache script, the benchmark file, and the evaluation harness support for it were all removed together, along with a handful of old exploratory scripts and notebooks from earlier in the project that predated the current architecture and were confirmed, one file at a time, to have no remaining callers anywhere in the codebase.</p>
+
+    <h2>A Reproducibility Bug in the Ontology Index Build Script</h2>
+
+    <p>While checking that everything remaining was actually needed, the script responsible for building the ontology embedding index turned out to be quietly broken. It expected two RDF files that no longer exist in the project, and its output filenames did not match what the rest of the pipeline actually reads. The index files currently in use had been built by an earlier version of this logic, before the project moved to a dbo-only index, and the production script had drifted out of sync with that decision without me noticing, since it had not actually been run since.</p>
+
+<pre><code>def extract_dbo_from_owl(owl_file):
+    ...
+    for prop_uri, data in prop_data.items():
+        onto_path = uri_str.split("dbpedia.org/ontology/")[-1]
+        if "/" in onto_path:
+            continue  # skip class-scoped variants like dbo:PopulatedPlace/area
+        ...</code></pre>
+
+    <p>The fix rewrote the script to match the dbo-only architecture exactly, sourcing only from the OWL file and producing the correctly named output. Before trusting it, the existing working index was backed up, the corrected script was run fresh, and the result was compared entry by entry against the backup: identical count, identical URIs. Only after that check passed, and a live question through the full pipeline confirmed nothing had regressed, was the fix committed.</p>
+
+    <h2>Reorganising for Reproducibility</h2>
+
+    <p>The DBpedia OWL ontology file the pipeline depends on had been sitting in a folder that is not tracked by git, which meant a fresh clone of the repository was missing a file the setup instructions assumed was there. It was moved into a new folder that is tracked, and the two places that reference its path were updated to match. The same question was asked about the final evaluation result files: they were being cited by the new results document but were sitting in that same untracked folder, so the three confirmed final runs were made public in their own folder as well, so anyone can see the full raw output behind the reported numbers rather than only the summary.</p>
+
+    <p>The README was rewritten end to end to reflect all of this: a project details table at the top, the headline result stated plainly near the top instead of buried further down, the repository layout as a table instead of a tree, and explicit setup instructions for the two things that were previously undocumented assumptions, that Redis is optional with a graceful fallback rather than a hard requirement, and that the evaluation endpoint and LLM provider are both configurable rather than fixed.</p>
+
+    <h2>Challenges</h2>
+
+    <p>The main challenge this week was similar in spirit to last week's: another case of something drifting quietly out of sync without getting noticed, this time in the ontology index build script rather than the demo interface. The pattern points to the same lesson repeated in a different part of the project, that any part of a codebase not exercised regularly needs to be checked directly every so often rather than assumed to still work, since nothing here failed badly enough to be caught otherwise.</p>
+
+    <p>Deciding how much unused code to remove also took some care. Some of it was unambiguous, entire files with no remaining callers anywhere. Some of it was closer to a judgement call, like small utility functions that are not currently used by the pipeline but are not obviously wrong either. The approach settled on was to remove anything with a clear, traceable reason it was no longer needed, and to leave alone anything that was simply unused but still a reasonable, self-contained piece of code, rather than treating "not currently called" as sufficient reason on its own.</p>
+
+    <h2>What's Next</h2>
+
+    <p>This closes out the coding phase of the project. Next week is the final submission week: preparing the documentation and the final report for the GSoC submission form, with no further code changes planned.</p>
+  </div>
 </main>
 
 <footer>
