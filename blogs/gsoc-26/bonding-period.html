@@ -83,8 +83,8 @@
     <p>They submitted two versions to the challenge, one powered by Claude Sonnet and one by Qwen 3.5 122B. The official results on the DB26 DBpedia track:</p>
 
     <ul>
-      <li>LIBER-AI-CLAUDE: 34.83% F1</li>
-      <li>LIBER-AI-QWEN: 27.45% F1</li>
+      <li>LIBER-AI-CLAUDE: 32% F1</li>
+      <li>LIBER-AI-QWEN: 31% F1</li>
     </ul>
 
     <p>These are the real baselines for this summer. Not Mehrzad's BLEU scores from 2023.</p>
@@ -101,7 +101,7 @@
 
     <p>Coding starts May 25th. The first thing on the list is understanding exactly where the current system fails and why, using the per-question breakdown from the Text2SPARQL results. The docs/analysis.md file in the repo documents nine prompt versions and concludes that 22% structural accuracy appears to be the ceiling for prompt engineering alone on this task and model combination.</p>
 
-    <p>My goal this summer is to push past the 34.83% F1 baseline by adding a FAISS vector fallback for entity linking on ambiguous mentions, improving the ontology exploration step to reduce predicate hallucinations, and running a full evaluation against the QALD-9-plus benchmark which the current system has not been tested on.</p>
+    <p>My goal this summer is to push past the 32% F1 baseline by adding a FAISS vector fallback for entity linking on ambiguous mentions, improving the ontology exploration step to reduce predicate hallucinations, and running a full evaluation against the QALD-9-plus benchmark which the current system has not been tested on.</p>
   </div>
 </main>
 
