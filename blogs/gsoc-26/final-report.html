@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final Report: Agentic Question Answering over DBpedia — Malla Siddharth Reddy</title>
+  <link rel="stylesheet" href="../../style.css" />
+</head>
+<body>
+
+<header>
+  <nav>
+    <a class="nav-name" href="../../">Malla Siddharth Reddy</a>
+    <button class="nav-toggle" aria-label="Toggle navigation" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links">
+      <li><a href="../../">About</a></li>
+      <li><a href="../../experience/">Experience</a></li>
+      <li><a href="../../research/">Research</a></li>
+      <li><a href="../../projects/">Projects</a></li>
+      <li><a href="../../hobbies/">Hobbies</a></li>
+      <li><a href="../../blogs/" class="active">Blogs</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+  <div class="item-header">
+    <h1>Final Report: Agentic Question Answering over DBpedia</h1>
+    <p class="item-subtitle">GSoC 2026 · DBpedia · May 1 to August 24, 2026</p>
+  </div>
+  <div class="prose">
+    <p><strong>Contributor:</strong> Malla Siddharth Reddy</p>
+    <p><strong>Mentors:</strong> Tommaso Soru, Ronit Banerjee, Gandharva Naveen, Abdulsobur</p>
+
+    <p>This project builds an agentic LangGraph pipeline that translates natural language questions into SPARQL queries against DBpedia, using a live agentic probe to recover from failed queries instead of a static predicate index. Full architecture and setup instructions are in the README (all links provided in the Links section below); this post summarises the work, the results, and what this summer actually taught me.</p>
+
+    <h2>What I Built</h2>
+
+    <ul>
+      <li><strong>Planner</strong> — extracts entities, concepts, answer type, aggregator (COUNT/SUM/GROUP_BY/ORDER_BY), join type (SINGLE/UNION/INTERSECTION), whether a type filter is needed, and the number of relationship hops the question requires</li>
+      <li><strong>Entity Linker</strong> — Redis surface-form index with LLM disambiguation over ambiguous candidates, Unicode normalisation, and a heuristic fallback when Redis has no match</li>
+      <li><strong>Ontology Explorer</strong> — semantic search over a dbo-only Nomic Embed v1.5 index, replacing an earlier AI-labelled dbp: index after a controlled comparison showed no measurable difference in performance but offered a simpler solution</li>
+      <li><strong>Schema Introspector</strong> — enriches predicate candidates with domain, range, and label metadata from the DBpedia OWL ontology</li>
+      <li><strong>Query Builder</strong> — generates SPARQL with num_hops enforced as a hard structural constraint, plus explicit rules for aggregation syntax, join type, type filters, and triple direction</li>
+      <li><strong>Query Executor</strong> — a class-safe deterministic dbo: to dbp: namespace swap as a first fallback</li>
+      <li><strong>Validator</strong> — a two-stage agentic probe that discovers what properties actually exist for an entity, plus three targeted recovery mechanisms: dead URI detection, two-hop probe chaining, and type-aware probe filtering</li>
+      <li>A full evaluation harness reporting F1, precision, recall, and agent steps per question (along with median and mode), and a live streaming demo UI rebuilt to reflect this exact pipeline</li>
+    </ul>
+
+    <h2>Results</h2>
+
+    <p>F1 = 0.6119 with Claude Sonnet 4.6 on the Text2SPARQL 2026 DB26 benchmark, a 90% relative improvement over the pre-GSoC baseline (0.32). Qwen 3.5 122B reached F1 = 0.5109, a ~65% improvement over its own baseline. Full raw results are in eval-results/ and a per-question failure breakdown is in docs/final-results-analysis.md.</p>
+
+    <h2>Challenges and What I Learned</h2>
+
+    <p>This project taught me far more than I expected going in. The real DBpedia data underneath everything is messy in ways no tutorial prepares you for, inconsistent entity naming, disambiguation suffixes that silently break lookups, properties that exist under one namespace but not another, gold benchmark queries that use invalid syntax. Working through that messiness, rather than around it, was most of the actual engineering this summer.</p>
+
+    <p>I also got to properly compare architectures instead of just picking one and hoping. Running a full two-index system against a simpler dbo-only design side by side, and learning firsthand that the simpler, more defensible approach can match a more complex one that looks more thorough on paper. That tradeoff between simplicity and complexity came up again and again, and I don't think I understood it as well before this summer as I do now.</p>
+
+    <p>Beyond the technical side, I'm just genuinely grateful for the chance to work on something real, with real data, amazing mentors giving real feedback, and a real benchmark to be honest against. It has been the best learning experience I've had, and I'm walking away from it a noticeably better engineer than I was in April. Keeping all this in mind I have also decided to continue contributing to DBpedia post GSoC.</p>
+
+    <h2>What's Left</h2>
+
+    <p>The detailed reasoning behind each of these is in the "What Would Move F1 Beyond the Current Best" section at the end of docs/final-results-analysis.md (link provided below), scroll to the bottom for the full breakdown. In short:</p>
+
+    <ul>
+      <li>Extending the agentic probe to check the object side of a relationship, not just the subject</li>
+      <li>A wider hop budget for questions needing more than two chained relationships</li>
+      <li>Result-set aware scoring that credits legitimate subsets or supersets of the gold answer</li>
+      <li>A dedicated query strategy for full-scan superlative questions with no entity to anchor a probe on</li>
+    </ul>
+
+    <h2>Links</h2>
+
+    <ul>
+      <li><a href="https://summerofcode.withgoogle.com/programs/2026/projects/bhnldATH">GSoC dashboard project page</a></li>
+      <li><a href="https://github.com/dbpedia/agentic-kgqa/pull/1">Pull request, all 68 commits, a single PR tracking every commit made this summer, from the first week of exploration to the final cleanup</a></li>
+      <li><a href="https://github.com/dbpedia/agentic-kgqa/blob/gsoc-siddharth/README.md">README</a></li>
+      <li><a href="https://github.com/dbpedia/agentic-kgqa/blob/gsoc-siddharth/docs/final-results-analysis.md">Final results analysis</a></li>
+      <li><a href="https://github.com/dbpedia/agentic-kgqa/tree/gsoc-siddharth/eval-results">Raw evaluation results</a></li>
+      <li><a href="https://mallasiddharthreddy.github.io/blogs/gsoc-26/">Weekly coding blog, Community Bonding through Week 12, written in chronological order from the very first week, and fairly detailed, so the ideas, architecture, and decisions can be seen forming and changing in real time from start to end</a></li>
+    </ul>
+
+    <p>Thank you to my mentors : Tommaso, Ronit, Gandharva, and Abdulsobur for the mentorship and patience that you have shown towards me this summer.</p>
+  </div>
+</main>
+
+<footer>
+  <p>© 2026 Malla Siddharth Reddy</p>
+</footer>
+
+</body>
+</html>
